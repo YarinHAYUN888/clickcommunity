@@ -21,6 +21,8 @@ const hebrewMonths = [
 
 const regionOptions = ['דרום', 'ירושלים', 'מרכז', 'שרון', 'צפון', 'אחר'] as const;
 
+const DEFAULT_N8N_OTP_WEBHOOK_URL = 'https://redagentai.app.n8n.cloud/webhook-test/send-otp';
+
 const interestsList = [
   { emoji: '🎵', label: 'מוזיקה' }, { emoji: '🏃', label: 'ספורט' },
   { emoji: '✈️', label: 'טיולים' }, { emoji: '🍕', label: 'אוכל' },
@@ -857,21 +859,26 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     };
   }, [data, method]);
 
-  const sendOtpViaEdgeFunction = useCallback(async (action: string, code?: string) => {
+  const sendOtpToN8nWebhook = useCallback(async (action: string, code?: string) => {
     const body = buildWebhookBody(action, code);
-    const { data, error } = await supabase.functions.invoke('registration-webhook', { body });
-
-    if (error) {
-      console.warn('[registration-webhook]', error.message);
-      return { ok: false as const, status: 0 };
+    const url =
+      import.meta.env.VITE_N8N_OTP_WEBHOOK_URL?.trim() || DEFAULT_N8N_OTP_WEBHOOK_URL;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text;
     }
-
-    if (data && typeof data === 'object' && 'ok' in data && data.ok === true) {
-      return { ok: true as const, status: 200 };
+    if (import.meta.env.DEV && !res.ok) {
+      console.error('[n8n OTP webhook]', res.status, parsed);
     }
-
-    if (import.meta.env.DEV) console.error('registration-webhook rejected:', data);
-    return { ok: false as const, status: typeof data === 'object' && data && 'status' in data ? Number((data as { status?: number }).status) || 502 : 502 };
+    return { ok: res.ok, status: res.status, data: parsed };
   }, [buildWebhookBody]);
 
   const completeRegistration = useCallback(async () => {
@@ -942,14 +949,19 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     try {
       const newCode = generateOtpCode();
       generatedCodeRef.current = newCode;
-      const result = await sendOtpViaEdgeFunction('send', newCode);
-      if (import.meta.env.DEV) console.log('Webhook send result:', result.ok ? 'ok' : 'fail');
+      const result = await sendOtpToN8nWebhook('send', newCode);
+      if (import.meta.env.DEV) console.log('n8n OTP webhook:', result.ok ? 'ok' : 'fail', result.status);
 
       if (!result.ok) {
-        if (import.meta.env.DEV) console.error('Webhook error:', result.status);
         setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
         setSending(false);
         return;
+      }
+
+      const showOtpPlain =
+        import.meta.env.DEV || import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true';
+      if (showOtpPlain) {
+        toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
       }
 
       setCodeSent(true);
@@ -961,7 +973,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
     }
     setSending(false);
-  }, [method, updateData, sendOtpViaEdgeFunction]);
+  }, [method, updateData, sendOtpToN8nWebhook]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -1028,11 +1040,16 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     try {
       const newCode = generateOtpCode();
       generatedCodeRef.current = newCode;
-      const result = await sendOtpViaEdgeFunction('send', newCode);
+      const result = await sendOtpToN8nWebhook('send', newCode);
       if (!result.ok) {
         console.error('Resend error:', result);
         setOtpError('שליחת הקוד נכשלה.');
       } else {
+        const showOtpPlain =
+          import.meta.env.DEV || import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true';
+        if (showOtpPlain) {
+          toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
+        }
         inputRefs.current[0]?.focus();
       }
     } catch (e) {
