@@ -857,7 +857,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     };
   }, [data, method]);
 
-  const WEBHOOK_URL = 'https://redagentai.app.n8n.cloud/webhook-test/send-otp';
+  const WEBHOOK_URL = 'https://redagentai.app.n8n.cloud/webhook/send-otp';
 
   const callWebhookDirect = useCallback(async (action: string, code?: string) => {
     const body = buildWebhookBody(action, code);
