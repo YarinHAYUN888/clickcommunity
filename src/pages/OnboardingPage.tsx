@@ -862,7 +862,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     const { data, error } = await supabase.functions.invoke('registration-webhook', { body });
 
     if (error) {
-      if (import.meta.env.DEV) console.error('registration-webhook:', error.message);
+      console.warn('[registration-webhook]', error.message);
       return { ok: false as const, status: 0 };
     }
 

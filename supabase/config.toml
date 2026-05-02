@@ -1,1 +1,5 @@
 project_id = "lwprevqahebqenpzdvle"
+
+# OTP send happens before any user session exists — gateway must allow anon invoke
+[functions.registration-webhook]
+verify_jwt = false
