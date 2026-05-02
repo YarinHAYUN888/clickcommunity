@@ -857,19 +857,21 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     };
   }, [data, method]);
 
-  const WEBHOOK_URL = 'https://redagentai.app.n8n.cloud/webhook/send-otp';
-
-  const callWebhookDirect = useCallback(async (action: string, code?: string) => {
+  const sendOtpViaEdgeFunction = useCallback(async (action: string, code?: string) => {
     const body = buildWebhookBody(action, code);
-    const res = await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const text = await res.text();
-    let parsed: any = null;
-    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-    return { ok: res.ok, status: res.status, data: parsed };
+    const { data, error } = await supabase.functions.invoke('registration-webhook', { body });
+
+    if (error) {
+      if (import.meta.env.DEV) console.error('registration-webhook:', error.message);
+      return { ok: false as const, status: 0 };
+    }
+
+    if (data && typeof data === 'object' && 'ok' in data && data.ok === true) {
+      return { ok: true as const, status: 200 };
+    }
+
+    if (import.meta.env.DEV) console.error('registration-webhook rejected:', data);
+    return { ok: false as const, status: typeof data === 'object' && data && 'status' in data ? Number((data as { status?: number }).status) || 502 : 502 };
   }, [buildWebhookBody]);
 
   const completeRegistration = useCallback(async () => {
@@ -940,7 +942,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     try {
       const newCode = generateOtpCode();
       generatedCodeRef.current = newCode;
-      const result = await callWebhookDirect('send', newCode);
+      const result = await sendOtpViaEdgeFunction('send', newCode);
       if (import.meta.env.DEV) console.log('Webhook send result:', result.ok ? 'ok' : 'fail');
 
       if (!result.ok) {
@@ -959,7 +961,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
     }
     setSending(false);
-  }, [method, updateData, callWebhookDirect]);
+  }, [method, updateData, sendOtpViaEdgeFunction]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -1026,7 +1028,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     try {
       const newCode = generateOtpCode();
       generatedCodeRef.current = newCode;
-      const result = await callWebhookDirect('send', newCode);
+      const result = await sendOtpViaEdgeFunction('send', newCode);
       if (!result.ok) {
         console.error('Resend error:', result);
         setOtpError('שליחת הקוד נכשלה.');
