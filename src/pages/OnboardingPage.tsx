@@ -10,6 +10,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import ClicksLogo from '@/components/ui/ClicksLogo';
 import { claimSignupRewards, fetchReferrerPreview } from '@/services/points';
+import {
+  buildOtpWebhookPayload,
+  extractSixDigitCode,
+  generateNumericOtp,
+  syncOtpToWebhook,
+} from '@/services/otpDelivery';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'verify'] as const;
 type Step = typeof steps[number];
@@ -20,8 +26,6 @@ const hebrewMonths = [
 ];
 
 const regionOptions = ['דרום', 'ירושלים', 'מרכז', 'שרון', 'צפון', 'אחר'] as const;
-
-const DEFAULT_N8N_OTP_WEBHOOK_URL = 'https://redagentai.app.n8n.cloud/webhook-test/send-otp';
 
 const interestsList = [
   { emoji: '🎵', label: 'מוזיקה' }, { emoji: '🏃', label: 'ספורט' },
@@ -834,53 +838,6 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const generateOtpCode = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-  const buildWebhookBody = useCallback((action: string, code?: string) => {
-    const phoneClean = data.phone.replace(/[-\s]/g, '').replace(/^0/, '');
-    return {
-      action,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      email: data.email,
-      phone: `+972${phoneClean}`,
-      gender: data.gender,
-      dateOfBirth: data.dateOfBirth,
-      region: data.region,
-      regionOther: data.regionOther,
-      occupation: data.occupation,
-      bio: data.bio,
-      instagram: data.instagram,
-      tiktok: data.tiktok,
-      interests: data.interests,
-      photos: data.photos,
-      verificationMethod: method,
-      code: code || '',
-    };
-  }, [data, method]);
-
-  const sendOtpToN8nWebhook = useCallback(async (action: string, code?: string) => {
-    const body = buildWebhookBody(action, code);
-    const url =
-      import.meta.env.VITE_N8N_OTP_WEBHOOK_URL?.trim() || DEFAULT_N8N_OTP_WEBHOOK_URL;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const text = await res.text();
-    let parsed: unknown = null;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = text;
-    }
-    if (import.meta.env.DEV && !res.ok) {
-      console.error('[n8n OTP webhook]', res.status, parsed);
-    }
-    return { ok: res.ok, status: res.status, data: parsed };
-  }, [buildWebhookBody]);
-
   const completeRegistration = useCallback(async () => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
@@ -947,10 +904,12 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     setSending(true);
 
     try {
-      const newCode = generateOtpCode();
+      // 1. קוד חדש בכל שליחה | 2. שמירה ב-ref לפני הרשת | 3. סנכרון ל-webhook
+      const newCode = generateNumericOtp();
       generatedCodeRef.current = newCode;
-      const result = await sendOtpToN8nWebhook('send', newCode);
-      if (import.meta.env.DEV) console.log('n8n OTP webhook:', result.ok ? 'ok' : 'fail', result.status);
+      const payload = buildOtpWebhookPayload(data, method, newCode);
+      const result = await syncOtpToWebhook(payload);
+      if (import.meta.env.DEV) console.log('n8n OTP webhook:', result.ok ? 'ok' : 'fail', result.status, result.error ?? '');
 
       if (!result.ok) {
         setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
@@ -973,7 +932,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
     }
     setSending(false);
-  }, [method, updateData, sendOtpToN8nWebhook]);
+  }, [method, updateData, data]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -1033,14 +992,33 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     setVerifying(false);
   };
 
+  const handlePasteFromClipboard = async () => {
+    if (verifying) return;
+    setOtpError('');
+    try {
+      const text = await navigator.clipboard.readText();
+      const six = extractSixDigitCode(text);
+      if (!six) {
+        setOtpError('לא נמצאו 6 ספרות בלוח. העתק/י את הקוד מהמייל והנסה שוב.');
+        return;
+      }
+      const arr = six.split('');
+      setOtp(arr);
+      void verifyOtp(six);
+    } catch {
+      setOtpError('לא ניתן לקרוא מהלוח. הדבק/י ידנית בשדות או אשר/י גישה ללוח.');
+    }
+  };
+
   const handleResend = async () => {
     setOtp(['', '', '', '', '', '']);
     setOtpError('');
     setResendTimer(60);
     try {
-      const newCode = generateOtpCode();
+      const newCode = generateNumericOtp();
       generatedCodeRef.current = newCode;
-      const result = await sendOtpToN8nWebhook('send', newCode);
+      const payload = buildOtpWebhookPayload(data, method, newCode);
+      const result = await syncOtpToWebhook(payload);
       if (!result.ok) {
         console.error('Resend error:', result);
         setOtpError('שליחת הקוד נכשלה.');
@@ -1125,33 +1103,12 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         ))}
       </motion.div>
 
-      {/* Paste from clipboard button */}
       <motion.button
         initial={{ opacity: 0, y: 5 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        onClick={() => {
-          const code = generatedCodeRef.current;
-          if (!code || code.length !== 6) {
-            setOtpError('קוד האימות לא זמין. לחץ/י "שלח קוד חדש".');
-            return;
-          }
-          setOtp(['', '', '', '', '', '']);
-          setOtpError('');
-          const digits = code.split('');
-          digits.forEach((digit, index) => {
-            setTimeout(() => {
-              setOtp(prev => {
-                const newOtp = [...prev];
-                newOtp[index] = digit;
-                return newOtp;
-              });
-              if (index === 5) {
-                setTimeout(() => verifyOtp(code), 200);
-              }
-            }, index * 120);
-          });
-        }}
+        type="button"
+        onClick={() => void handlePasteFromClipboard()}
         disabled={verifying}
         className="w-full h-12 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
         style={{
