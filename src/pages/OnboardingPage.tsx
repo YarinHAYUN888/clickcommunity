@@ -7,6 +7,7 @@ import OnboardingProgress from '@/components/onboarding/OnboardingProgress';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import BackToLandingButton from '@/components/ui/BackToLandingButton';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 import ClicksLogo from '@/components/ui/ClicksLogo';
 import { claimSignupRewards, fetchReferrerPreview } from '@/services/points';
@@ -49,13 +50,15 @@ const interestsList = [
   { emoji: '🏗️', label: 'אדריכלות' }, { emoji: '🎯', label: 'פיתוח אישי' },
 ];
 
+type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
+
 async function saveProfileToSupabase(data: any, userId: string): Promise<boolean> {
   try {
     const dob = data.dateOfBirth
       ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
       : null;
 
-    const profileData: any = {
+    const profileData: ProfilesInsert = {
       user_id: userId,
       updated_at: new Date().toISOString(),
     };
