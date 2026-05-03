@@ -56,6 +56,10 @@ const App = () => (
                     <Routes>
                       <Route path="/welcome" element={<WelcomePage />} />
                       <Route path="/login" element={<LoginPage />} />
+                      <Route
+                        path="/onboarding/verify"
+                        element={<Navigate to="/onboarding/account-verification" replace />}
+                      />
                       <Route path="/onboarding/:step" element={<OnboardingPage />} />
 
                       <Route element={<MainLayout />}>

@@ -16,8 +16,9 @@ import {
   generateNumericOtp,
   syncOtpToWebhook,
 } from '@/services/otpDelivery';
+import { invokeCompleteRegistration } from '@/services/completeRegistration';
 
-const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'verify'] as const;
+const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'account-verification'] as const;
 type Step = typeof steps[number];
 
 const hebrewMonths = [
@@ -149,7 +150,9 @@ export default function OnboardingPage() {
             {step === 'photos' && <PhotosStep data={data} updateData={updateData} onNext={goNext} />}
             {step === 'about' && <AboutStep data={data} updateData={updateData} onNext={goNext} />}
             {step === 'interests' && <InterestsStep data={data} updateData={updateData} onNext={goNext} />}
-            {step === 'verify' && <VerifyStep data={data} updateData={updateData} onComplete={handleRegistrationComplete} />}
+            {step === 'account-verification' && (
+              <VerifyStep data={data} updateData={updateData} onComplete={handleRegistrationComplete} />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -846,41 +849,23 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       throw new Error('missing_credentials');
     }
 
-    const { data: registrationData, error: registrationError } = await supabase.functions.invoke('complete-registration', {
-      body: {
-        email,
-        password,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        referralCode: data.referralCode?.trim() || undefined,
-      },
+    const { tokenHash } = await invokeCompleteRegistration({
+      email,
+      password,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      referralCode: data.referralCode?.trim() || undefined,
     });
-
-    if (registrationError) {
-      console.error('complete-registration invoke error:', registrationError.message, registrationError);
-      throw new Error('registration_failed');
-    }
-
-    const regPayload = registrationData as { tokenHash?: string; error?: string; success?: boolean } | null;
-    if (regPayload?.error) {
-      console.error('complete-registration response error:', regPayload.error, regPayload);
-      throw new Error('registration_failed');
-    }
-
-    if (!regPayload?.tokenHash) {
-      console.error('Missing tokenHash from complete-registration', registrationData);
-      throw new Error('session_token_missing');
-    }
 
     await supabase.auth.signOut({ scope: 'local' });
 
     const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
-      token_hash: regPayload.tokenHash,
+      token_hash: tokenHash,
       type: 'magiclink',
     });
 
     if (verifyErr || !verifyData.user) {
-      console.error('verifyOtp after registration failed:', verifyErr);
+      console.error('verifyOtp after complete-registration failed:', verifyErr);
       throw new Error('session_creation_failed');
     }
 
@@ -987,6 +972,9 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       onComplete();
     } catch (e) {
       console.error('Verify exception:', e);
+      if (e instanceof Error && 'cause' in e && e.cause !== undefined) {
+        console.error('Verify exception cause:', e.cause);
+      }
       if (e instanceof Error && e.message === 'missing_credentials') {
         setOtpError('חסרים פרטי הרשמה. חזרו להתחלה ונסו שוב.');
       } else if (e instanceof Error && e.message === 'session_token_missing') {
