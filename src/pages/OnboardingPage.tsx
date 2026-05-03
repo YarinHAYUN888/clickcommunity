@@ -857,24 +857,30 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     });
 
     if (registrationError) {
-      if (import.meta.env.DEV) console.error('complete-registration invoke error:', registrationError);
+      console.error('complete-registration invoke error:', registrationError.message, registrationError);
       throw new Error('registration_failed');
     }
 
-    if (!registrationData?.tokenHash) {
-      if (import.meta.env.DEV) console.error('Missing tokenHash from complete-registration');
+    const regPayload = registrationData as { tokenHash?: string; error?: string; success?: boolean } | null;
+    if (regPayload?.error) {
+      console.error('complete-registration response error:', regPayload.error, regPayload);
+      throw new Error('registration_failed');
+    }
+
+    if (!regPayload?.tokenHash) {
+      console.error('Missing tokenHash from complete-registration', registrationData);
       throw new Error('session_token_missing');
     }
 
     await supabase.auth.signOut({ scope: 'local' });
 
     const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
-      token_hash: registrationData.tokenHash,
+      token_hash: regPayload.tokenHash,
       type: 'magiclink',
     });
 
     if (verifyErr || !verifyData.user) {
-      if (import.meta.env.DEV) console.error('verifyOtp after registration failed:', verifyErr);
+      console.error('verifyOtp after registration failed:', verifyErr);
       throw new Error('session_creation_failed');
     }
 
@@ -985,6 +991,10 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         setOtpError('חסרים פרטי הרשמה. חזרו להתחלה ונסו שוב.');
       } else if (e instanceof Error && e.message === 'session_token_missing') {
         setOtpError('לא הצלחנו ליצור חיבור מאובטח. נסה/י שוב.');
+      } else if (e instanceof Error && e.message === 'registration_failed') {
+        setOtpError('השרת לא הצליח ליצור את החשבון. נסה/י שוב או בדקו את החיבור לסופאבייס.');
+      } else if (e instanceof Error && e.message === 'session_creation_failed') {
+        setOtpError('החשבון נוצר אך ההתחברות נכשלה. נסה/י להתחבר עם האימייל והסיסמה.');
       } else {
         setOtpError('שגיאה ביצירת החשבון. נסה/י שוב.');
       }
