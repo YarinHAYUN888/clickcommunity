@@ -33,24 +33,9 @@ function logInvokeError(scope: string, err: unknown) {
  * Calls deployed Edge Function `complete-registration` only (no legacy `verify` function).
  */
 export async function invokeCompleteRegistration(
-  body: CompleteRegistrationBody,
+  payload: CompleteRegistrationBody,
 ): Promise<{ tokenHash: string; code: 'created' | 'already_exists'; userId: string | null }> {
-  const { data: sessionData } = await supabase.auth.getSession()
-
-if (!sessionData?.session) {
-  throw new Error("no_session")
-}
-
-const body = {
-  tokenHash: sessionData.session.access_token
-}
-
-const { data, error } = await supabase.functions.invoke('complete-registration', {
-  body,
-  headers: {
-    Authorization: `Bearer ${sessionData.session.access_token}`
-  }
-})
+  const { data, error } = await supabase.functions.invoke('complete-registration', { body: payload });
 
   if (error) {
     logInvokeError('complete-registration', error);
