@@ -166,7 +166,9 @@ export default function ProfilePage() {
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-5 pt-20 z-10">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold text-white" style={{ textShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-              {profile?.first_name || 'השלם/י את הפרופיל'}{age ? `, ${age}` : ''}
+              {[profile?.first_name, profile?.last_name].filter(Boolean).join(' ') ||
+                'השלם/י את הפרופיל'}
+              {age ? `, ${age}` : ''}
             </h1>
             {profile?.status && <StatusBadge status={profile.status} />}
           </div>

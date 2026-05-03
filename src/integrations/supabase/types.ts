@@ -522,6 +522,7 @@ export type Database = {
           id: string
           instagram: string | null
           interests: string[] | null
+          last_name: string | null
           last_seen: string | null
           last_tenure_grant_at: string | null
           occupation: string | null
@@ -555,6 +556,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           interests?: string[] | null
+          last_name?: string | null
           last_seen?: string | null
           last_tenure_grant_at?: string | null
           occupation?: string | null
@@ -588,6 +590,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           interests?: string[] | null
+          last_name?: string | null
           last_seen?: string | null
           last_tenure_grant_at?: string | null
           occupation?: string | null

@@ -77,6 +77,34 @@ export async function cancelSubscription(userId: string) {
   return data;
 }
 
+/** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
+export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
+  const projectUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? '';
+  const out: string[] = [];
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    if (!s) continue;
+    if (s.startsWith('data:') || s.startsWith('blob:')) {
+      const res = await fetch(s);
+      const blob = await res.blob();
+      const mime = blob.type || 'image/jpeg';
+      const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
+      const file = new File([blob], `onboarding-${i}.${sub}`, { type: mime });
+      out.push(await uploadProfilePhoto(userId, file, i));
+      continue;
+    }
+    const isProjectPublic =
+      projectUrl &&
+      (s.startsWith(`${projectUrl}/storage/`) || s.includes('/storage/v1/object/public/photos/'));
+    if (isProjectPublic) {
+      out.push(s);
+      continue;
+    }
+    out.push(s);
+  }
+  return out;
+}
+
 export async function uploadProfilePhoto(userId: string, file: File, index: number) {
   const fileExt = file.name.split('.').pop();
   const filePath = `${userId}/${index}-${Date.now()}.${fileExt}`;

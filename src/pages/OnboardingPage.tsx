@@ -18,6 +18,7 @@ import {
   syncOtpToWebhook,
 } from '@/services/otpDelivery';
 import { invokeCompleteRegistration } from '@/services/completeRegistration';
+import { uploadOnboardingPhotosFromDataUrls } from '@/services/profile';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'account-verification'] as const;
 type Step = typeof steps[number];
@@ -52,41 +53,39 @@ const interestsList = [
 
 type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
 
-async function saveProfileToSupabase(data: any, userId: string): Promise<boolean> {
-  try {
-    const dob = data.dateOfBirth
-      ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
-      : null;
+async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
+  const dob = data.dateOfBirth
+    ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
+    : null;
 
-    const profileData: ProfilesInsert = {
-      user_id: userId,
-      updated_at: new Date().toISOString(),
-    };
-    if (data.firstName) profileData.first_name = data.firstName;
-    if (data.phone) profileData.phone = data.phone;
-    if (dob) profileData.date_of_birth = dob;
-    if (data.gender) profileData.gender = data.gender;
-    if (data.photos && data.photos.length > 0) {
-      profileData.photos = data.photos;
-      profileData.avatar_url = data.photos[0];
-    }
-    if (data.occupation) profileData.occupation = data.occupation;
-    if (data.bio !== undefined) profileData.bio = data.bio;
-    if (data.interests && data.interests.length > 0) profileData.interests = data.interests;
-    if (data.region) profileData.region = data.region;
-    if (data.regionOther !== undefined) profileData.region_other = data.regionOther || null;
-    if (data.instagram !== undefined) profileData.instagram = data.instagram || null;
-    if (data.tiktok !== undefined) profileData.tiktok = data.tiktok || null;
+  const profileData: ProfilesInsert = {
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (data.firstName) profileData.first_name = data.firstName;
+  if (data.lastName !== undefined && data.lastName !== null) {
+    const ln = String(data.lastName).trim();
+    profileData.last_name = ln.length > 0 ? ln : null;
+  }
+  if (data.phone) profileData.phone = data.phone;
+  if (dob) profileData.date_of_birth = dob;
+  if (data.gender) profileData.gender = data.gender;
+  if (data.photos && data.photos.length > 0) {
+    profileData.photos = data.photos;
+    profileData.avatar_url = data.photos[0];
+  }
+  if (data.occupation) profileData.occupation = data.occupation;
+  if (data.bio !== undefined) profileData.bio = data.bio;
+  if (data.interests && data.interests.length > 0) profileData.interests = data.interests;
+  if (data.region) profileData.region = data.region;
+  if (data.regionOther !== undefined) profileData.region_other = data.regionOther || null;
+  if (data.instagram !== undefined) profileData.instagram = data.instagram || null;
+  if (data.tiktok !== undefined) profileData.tiktok = data.tiktok || null;
 
-    const { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
-    if (error) {
-      console.error('Profile upsert error:', error);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.error('Failed to save profile:', e);
-    return false;
+  const { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
+  if (error) {
+    console.error('Profile upsert error:', error);
+    throw new Error('profile_save_failed');
   }
 }
 
@@ -872,9 +871,13 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       throw new Error('session_creation_failed');
     }
 
-    const saved = await saveProfileToSupabase(data, verifyData.user.id);
-    if (!saved) {
-      toast.error('שגיאה בשמירת הפרופיל');
+    const uid = verifyData.user.id;
+    try {
+      const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
+      await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
+    } catch (e) {
+      console.error('Profile or photo upload failed:', e);
+      throw new Error('profile_save_failed');
     }
 
     const refRaw =
@@ -986,6 +989,8 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         setOtpError('השרת לא הצליח ליצור את החשבון. נסה/י שוב או בדקו את החיבור לסופאבייס.');
       } else if (e instanceof Error && e.message === 'session_creation_failed') {
         setOtpError('החשבון נוצר אך ההתחברות נכשלה. נסה/י להתחבר עם האימייל והסיסמה.');
+      } else if (e instanceof Error && e.message === 'profile_save_failed') {
+        setOtpError('לא הצלחנו לשמור את פרטי הפרופיל או התמונות. נסה/י שוב.');
       } else {
         setOtpError('שגיאה ביצירת החשבון. נסה/י שוב.');
       }
