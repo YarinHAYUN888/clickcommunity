@@ -9,6 +9,8 @@ export interface ChatRow {
   expires_at: string | null;
   is_closed: boolean;
   created_at: string;
+  display_name?: string | null;
+  created_by?: string | null;
 }
 
 export interface MessageRow {
@@ -226,10 +228,32 @@ export function subscribeToMessages(chatId: string, onMessage: (msg: MessageRow)
 /* ── Edge Function Calls ── */
 
 export async function sendMessage(chatId: string, content: string) {
+  const payload = { chat_id: chatId, content };
+  console.log('SEND MESSAGE PAYLOAD:', payload);
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) {
+    console.error('SEND MESSAGE ERROR:', new Error('No active session'));
+    throw new Error('Not authenticated');
+  }
+
   const { data, error } = await supabase.functions.invoke('send-message', {
-    body: { chat_id: chatId, content },
+    body: payload,
   });
-  if (error) throw error;
+
+  if (error) {
+    console.error('SEND MESSAGE ERROR:', error, data);
+    throw error;
+  }
+
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    const msg = String((data as { error: string }).error);
+    console.error('SEND MESSAGE ERROR:', msg);
+    throw new Error(msg);
+  }
+
   return data;
 }
 

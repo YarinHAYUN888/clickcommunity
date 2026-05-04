@@ -13,6 +13,7 @@
     "supabase:functions:deploy": "npx --yes supabase@latest functions deploy --project-ref lwprevqahebqenpzdvle",
     "supabase:functions:deploy-registration-webhook": "npx --yes supabase@latest functions deploy registration-webhook --project-ref lwprevqahebqenpzdvle --no-verify-jwt",
     "supabase:functions:deploy-complete-registration": "npx --yes supabase@latest functions deploy complete-registration --project-ref lwprevqahebqenpzdvle --no-verify-jwt",
+    "supabase:functions:deploy-chat-core": "npx --yes supabase@latest functions deploy send-message --project-ref lwprevqahebqenpzdvle && npx --yes supabase@latest functions deploy mark-messages-read --project-ref lwprevqahebqenpzdvle && npx --yes supabase@latest functions deploy create-or-get-dm --project-ref lwprevqahebqenpzdvle && npx --yes supabase@latest functions deploy create-group-chat --project-ref lwprevqahebqenpzdvle",
     "supabase:db:migrate:stage5": "npx --yes supabase@latest db query --linked -f supabase/migrations/20260430120000_add_points_and_referrals_v2.sql",
     "supabase:db:apply-profile-socials": "npx --yes supabase@latest db query --linked -f supabase/migrations/20260503120000_ensure_profiles_onboarding_social_columns.sql",
     "test": "vitest run",

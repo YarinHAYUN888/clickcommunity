@@ -25,11 +25,11 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const { data: claims, error: claimsErr } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
-    if (claimsErr || !claims?.claims) {
+    const { data: userData, error: userErr } = await supabaseUser.auth.getUser();
+    if (userErr || !userData?.user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = claims.claims.sub as string;
+    const userId = userData.user.id;
 
     const { chat_id } = await req.json();
     if (!chat_id) {
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       .eq("chat_id", chat_id)
       .eq("user_id", userId)
       .eq("removed", false)
-      .single();
+      .maybeSingle();
 
     if (!participant) {
       return new Response(JSON.stringify({ error: "Not a participant" }), { status: 403, headers: corsHeaders });

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Send, MoreVertical, Flag, Ban, BellOff } from 'lucide-react';
+import { ArrowRight, Send, Loader2 } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   getChatMessages,
@@ -12,6 +12,7 @@ import {
   MessageRow,
 } from '@/services/chat';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 function formatMsgTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
@@ -59,6 +60,9 @@ export default function ChatConversationPage() {
         if (chatData) {
           setChatClosed(chatData.is_closed || false);
           setChatExpired(chatData.expires_at ? new Date(chatData.expires_at) < new Date() : false);
+          if (chatData.type === 'group' && chatData.display_name) {
+            setPartnerName(chatData.display_name);
+          }
         }
 
         // Load partner info (for DMs)
@@ -105,6 +109,10 @@ export default function ChatConversationPage() {
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || !chatId || sending) return;
+    if (!authId) {
+      toast.error('יש להתחבר כדי לשלוח הודעות');
+      return;
+    }
     const text = input.trim();
     setInput('');
     setSending(true);
@@ -116,7 +124,7 @@ export default function ChatConversationPage() {
     } finally {
       setSending(false);
     }
-  }, [input, chatId, sending]);
+  }, [input, chatId, sending, authId]);
 
   const isReadOnly = chatClosed || chatExpired;
 
@@ -283,13 +291,14 @@ export default function ChatConversationPage() {
               whileTap={{ scale: 0.9 }}
               onClick={handleSend}
               disabled={!input.trim() || sending}
+              aria-busy={sending}
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
                 input.trim()
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-secondary text-muted-foreground'
               }`}
             >
-              <Send size={18} className="rotate-180" />
+              {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} className="rotate-180" />}
             </motion.button>
           </div>
         </div>

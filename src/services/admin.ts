@@ -24,6 +24,18 @@ export async function getAdminUsers(filter?: string, search?: string, page = 1, 
   return data;
 }
 
+/** Super-admin only — Edge Function validates JWT + super_role */
+export async function createAdminGroupChat(display_name: string, participant_user_ids: string[]) {
+  const { data, error } = await supabase.functions.invoke('create-group-chat', {
+    body: { display_name, participant_user_ids },
+  });
+  if (error) throw error;
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    throw new Error(String((data as { error: string }).error));
+  }
+  return data as { success?: boolean; chat_id?: string };
+}
+
 export async function getAdminEventDetails(eventId: string) {
   const { data, error } = await supabase.functions.invoke('admin-get-event-details', {
     body: { event_id: eventId },

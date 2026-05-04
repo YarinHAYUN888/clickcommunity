@@ -207,6 +207,8 @@ export type Database = {
           closed_at: string | null
           closed_by: string | null
           created_at: string | null
+          created_by: string | null
+          display_name: string | null
           event_id: string | null
           expires_at: string | null
           id: string
@@ -222,6 +224,8 @@ export type Database = {
           closed_at?: string | null
           closed_by?: string | null
           created_at?: string | null
+          created_by?: string | null
+          display_name?: string | null
           event_id?: string | null
           expires_at?: string | null
           id?: string
@@ -237,6 +241,8 @@ export type Database = {
           closed_at?: string | null
           closed_by?: string | null
           created_at?: string | null
+          created_by?: string | null
+          display_name?: string | null
           event_id?: string | null
           expires_at?: string | null
           id?: string

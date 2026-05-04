@@ -92,7 +92,7 @@ export default function ChatsPage() {
             ]);
             return {
               chat,
-              eventName: eventInfo?.name || 'צ׳אט קבוצתי',
+              eventName: eventInfo?.name || chat.display_name || 'צ׳אט קבוצתי',
               eventCover: eventInfo?.cover_image_url || null,
               lastMsg,
               unread,

@@ -5,6 +5,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type ShadowBucket = "normal" | "shadow" | "other";
+
+async function profileShadowBucket(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<ShadowBucket> {
+  const { data } = await admin.from("profiles").select("suitability_status, is_shadow").eq("user_id", userId).maybeSingle();
+  if (!data) return "other";
+  const sh = data.suitability_status === "shadow" && data.is_shadow === true;
+  const norm = data.suitability_status === "active" && data.is_shadow !== true;
+  if (sh) return "shadow";
+  if (norm) return "normal";
+  return "other";
+}
+
+function bucketsIsolate(a: ShadowBucket, b: ShadowBucket): boolean {
+  return (a === "normal" && b === "shadow") || (a === "shadow" && b === "normal");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -25,11 +44,11 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const { data: claims, error: claimsErr } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
-    if (claimsErr || !claims?.claims) {
+    const { data: userData, error: userErr } = await supabaseUser.auth.getUser();
+    if (userErr || !userData?.user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = claims.claims.sub as string;
+    const userId = userData.user.id;
 
     const { other_user_id, icebreaker_text } = await req.json();
     if (!other_user_id) {
@@ -72,6 +91,15 @@ Deno.serve(async (req) => {
     if (existingChatId) {
       return new Response(JSON.stringify({ chat_id: existingChatId, is_new: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const ab = await profileShadowBucket(supabaseAdmin, userId);
+    const bb = await profileShadowBucket(supabaseAdmin, other_user_id);
+    if (bucketsIsolate(ab, bb)) {
+      return new Response(JSON.stringify({ error: "Shadow isolation: cannot start DM across universes" }), {
+        status: 403,
+        headers: corsHeaders,
       });
     }
 

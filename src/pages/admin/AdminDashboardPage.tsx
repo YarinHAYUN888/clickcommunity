@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, UserCheck, Calendar, MessageCircle, CreditCard, Shield, ChevronLeft } from 'lucide-react';
+import { Users, UserCheck, Calendar, MessageCircle, CreditCard, ChevronLeft } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
 import { getAdminStats } from '@/services/admin';
 import { UserReviewSection } from '@/components/admin/UserReviewSection';
+import { AdminCreateGroupChatSection } from '@/components/admin/AdminCreateGroupChatSection';
 
 function CountUp({ target, duration = 600 }: { target: number; duration?: number }) {
   const [value, setValue] = useState(0);
@@ -80,8 +81,9 @@ export default function AdminDashboardPage() {
           })}
         </div>
 
-        <div className="mb-4">
+        <div className="mb-4 space-y-3">
           <UserReviewSection />
+          <AdminCreateGroupChatSection />
         </div>
 
         {/* Nav Cards */}
