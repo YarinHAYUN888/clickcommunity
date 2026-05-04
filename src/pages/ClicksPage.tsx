@@ -8,21 +8,15 @@ import ClicksFeedSkeleton from '@/components/clicks/ClicksFeedSkeleton';
 import IcebreakerSheet from '@/components/clicks/IcebreakerSheet';
 import FullProfileModal from '@/components/clicks/FullProfileModal';
 import { useCurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
-import { useUserMode } from '@/hooks/useUserMode';
 import { useClicksFeed, ClickFeedItem } from '@/hooks/useClicksFeed';
 import { useNavigate } from 'react-router-dom';
 
 export default function ClicksPage() {
   const navigate = useNavigate();
   const { profile: myProfile, role, loading: userLoading } = useCurrentUser();
-  const { isShadowUser } = useUserMode();
   const isMember = role === 'member';
   const myInterests = myProfile?.interests || [];
-  const { items, loading: feedLoading, refresh } = useClicksFeed(
-    myProfile?.user_id || '',
-    myInterests,
-    isShadowUser,
-  );
+  const { items, loading: feedLoading, refresh } = useClicksFeed(myProfile?.user_id || '', myInterests);
   const loading = userLoading || feedLoading;
 
   const [tab, setTab] = useState<'general' | 'event'>('general');
@@ -141,7 +135,8 @@ export default function ClicksPage() {
               </div>
               <p className="text-[24px] text-h1-premium text-foreground">עוד אין קליקים</p>
               <p className="text-[15px] text-muted-foreground mt-2 max-w-[280px] mx-auto leading-relaxed">
-                ברגע שמשתמשים נוספים יירשמו לאפליקציה, ההתאמות שלך יופיעו כאן
+                ברגע שמשתמשים מתאימים (פעילים באותו עולם קהילה) עם תמונה בפרופיל יופיעו כאן.
+                משתמשים שממתינים לאישור מנהל לא נכללים בפיד עד לאישור.
               </p>
             </motion.div>
           ) : (

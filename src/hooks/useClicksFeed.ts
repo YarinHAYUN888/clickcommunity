@@ -16,7 +16,7 @@ function calculateCompatibility(myInterests: string[], theirInterests: string[])
   return { score, shared };
 }
 
-export function useClicksFeed(currentUserId: string, myInterests: string[], isShadowUser: boolean) {
+export function useClicksFeed(currentUserId: string, myInterests: string[]) {
   const [items, setItems] = useState<ClickFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const interestsRef = useRef(myInterests);
@@ -30,26 +30,36 @@ export function useClicksFeed(currentUserId: string, myInterests: string[], isSh
 
     setLoading(true);
 
-    const q = supabase
+    // RLS (Profiles select isolation) כבר מגביל active/shadow וכו׳ — לא מוסיפים סינון כפול כאן.
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('user_id', currentUserId)
-      .eq('suitability_status', 'active')
-      .eq('is_shadow', isShadowUser);
+      .neq('user_id', currentUserId);
 
-    const { data, error } = await q;
+    if (error) {
+      console.error('useClicksFeed:', error.message);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
 
-    if (error || !data) {
+    if (!data) {
+      setItems([]);
       setLoading(false);
       return;
     }
 
     const interests = interestsRef.current;
+
+    const hasDisplayPhoto = (p: SupabaseProfile) =>
+      (Array.isArray(p.photos) && p.photos.length > 0) || !!(p.avatar_url && String(p.avatar_url).trim());
+
     const profiles = (data as SupabaseProfile[])
-      .filter(p => p.first_name && p.photos && p.photos.length > 0);
+      .filter((p) => p.first_name && hasDisplayPhoto(p))
+      .filter((p) => p.role !== 'guest');
 
     const feedItems: ClickFeedItem[] = profiles
-      .map(profile => {
+      .map((profile) => {
         const { score, shared } = calculateCompatibility(interests, profile.interests || []);
         return { profile, compatibilityScore: score, sharedInterests: shared };
       })
@@ -57,7 +67,7 @@ export function useClicksFeed(currentUserId: string, myInterests: string[], isSh
 
     setItems(feedItems);
     setLoading(false);
-  }, [currentUserId, isShadowUser]);
+  }, [currentUserId]);
 
   useEffect(() => {
     fetchProfiles();
