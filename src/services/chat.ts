@@ -262,7 +262,10 @@ export async function createOrGetDm(otherUserId: string, icebreakerText?: string
     body: { other_user_id: otherUserId, icebreaker_text: icebreakerText },
   });
   if (error) throw error;
-  return data;
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    throw new Error(String((data as { error: string }).error));
+  }
+  return data as { chat_id: string; is_new?: boolean; first_message_id?: string | null };
 }
 
 export async function markAsRead(chatId: string) {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Send, Loader2 } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -9,6 +9,7 @@ import {
   subscribeToMessages,
   sendMessage,
   markAsRead,
+  createOrGetDm,
   MessageRow,
 } from '@/services/chat';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,9 +28,19 @@ function formatDateSeparator(dateStr: string) {
   return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' });
 }
 
+const USER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** מסלול מהקליקים: /chats/new-{user_id} — לא מזהה צ'אט אמיתי */
+function parseNewDmUserId(routeChatId: string): string | null {
+  if (!routeChatId.startsWith('new-')) return null;
+  const uid = routeChatId.slice('new-'.length);
+  return USER_UUID_RE.test(uid) ? uid : null;
+}
+
 export default function ChatConversationPage() {
   const { chatId } = useParams<{ chatId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { authId } = useCurrentUser();
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [partnerName, setPartnerName] = useState('');
@@ -43,14 +54,52 @@ export default function ChatConversationPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (!chatId || !authId) return;
+    if (!chatId) return;
 
-    let channel: any;
+    let channel: ReturnType<typeof subscribeToMessages> | undefined;
+    let cancelled = false;
 
     async function init() {
+      if (!authId) {
+        setLoading(false);
+        return;
+      }
+
+      if (chatId.startsWith('new-')) {
+        const otherFromClicks = parseNewDmUserId(chatId);
+        if (!otherFromClicks) {
+          toast.error('קישור צ׳אט לא תקין');
+          navigate('/chats', { replace: true });
+          setLoading(false);
+          return;
+        }
+        setLoading(true);
+        try {
+          const ice =
+            typeof location.state === 'object' &&
+            location.state !== null &&
+            'icebreaker' in location.state &&
+            typeof (location.state as { icebreaker?: string }).icebreaker === 'string'
+              ? (location.state as { icebreaker?: string }).icebreaker!.trim()
+              : '';
+          const result = await createOrGetDm(otherFromClicks, ice || undefined);
+          if (cancelled) return;
+          const realId = result?.chat_id;
+          if (!realId) throw new Error('לא התקבל מזהה צ׳אט מהשרת');
+          navigate(`/chats/${realId}`, { replace: true });
+          return;
+        } catch (err) {
+          console.error('Open DM error:', err);
+          toast.error(err instanceof Error ? err.message : 'לא ניתן לפתוח צ׳אט פרטי');
+          if (!cancelled) navigate('/chats', { replace: true });
+          setLoading(false);
+          return;
+        }
+      }
+
+
       setLoading(true);
       try {
-        // Load chat info
         const { data: chatData } = await supabase
           .from('chats')
           .select('*')
@@ -65,21 +114,17 @@ export default function ChatConversationPage() {
           }
         }
 
-        // Load partner info (for DMs)
         const partner = await getDmPartner(chatId, authId);
         if (partner) {
           setPartnerName(partner.first_name || 'משתמש/ת');
           setPartnerAvatar(partner.photos?.[0] || partner.avatar_url || null);
         }
 
-        // Load messages
         const msgs = await getChatMessages(chatId);
         setMessages(msgs);
 
-        // Mark as read
         markAsRead(chatId).catch(() => {});
 
-        // Subscribe to realtime
         channel = subscribeToMessages(chatId, (newMsg) => {
           setMessages((prev) => {
             if (prev.find((m) => m.id === newMsg.id)) {
@@ -92,23 +137,24 @@ export default function ChatConversationPage() {
       } catch (err) {
         console.error('Chat init error:', err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    init();
+    void init();
 
     return () => {
+      cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [chatId, authId]);
+  }, [chatId, authId, navigate, location.state]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || !chatId || sending) return;
+    if (!input.trim() || !chatId || sending || loading || chatId.startsWith('new-')) return;
     if (!authId) {
       toast.error('יש להתחבר כדי לשלוח הודעות');
       return;
@@ -120,11 +166,14 @@ export default function ChatConversationPage() {
       await sendMessage(chatId, text);
     } catch (err) {
       console.error('Send error:', err);
-      setInput(text); // Restore on error
+      const msg =
+        err instanceof Error ? err.message : typeof err === 'object' && err && 'message' in err ? String((err as Error).message) : 'לא ניתן לשלוח את ההודעה';
+      toast.error(msg);
+      setInput(text);
     } finally {
       setSending(false);
     }
-  }, [input, chatId, sending, authId]);
+  }, [input, chatId, sending, authId, loading]);
 
   const isReadOnly = chatClosed || chatExpired;
 
@@ -282,15 +331,16 @@ export default function ChatConversationPage() {
                   handleSend();
                 }
               }}
-              placeholder="כתוב/י הודעה..."
+              placeholder={loading && chatId.startsWith('new-') ? 'פותח צ׳אט…' : 'כתוב/י הודעה…'}
               rows={1}
-              className="flex-1 resize-none bg-muted/50 border border-border/30 rounded-full px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 max-h-24"
+              disabled={loading && chatId.startsWith('new-')}
+              className="flex-1 resize-none bg-muted/50 border border-border/30 rounded-full px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 max-h-24 disabled:opacity-60"
               style={{ minHeight: '40px' }}
             />
             <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={handleSend}
-              disabled={!input.trim() || sending}
+              disabled={!input.trim() || sending || (loading && chatId.startsWith('new-'))}
               aria-busy={sending}
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
                 input.trim()
