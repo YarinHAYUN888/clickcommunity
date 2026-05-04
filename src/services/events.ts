@@ -37,7 +37,38 @@ export interface EventRegistration {
   created_at: string;
 }
 
-export async function getUpcomingEvents(): Promise<EventRow[]> {
+async function filterEventsByHostIsolation(
+  events: EventRow[],
+  isShadowUser: boolean,
+): Promise<EventRow[]> {
+  const hostIds = [...new Set(events.map((e) => e.host_id).filter(Boolean) as string[])];
+  if (hostIds.length === 0) {
+    return isShadowUser ? [] : events;
+  }
+  const { data: hosts } = await supabase
+    .from('profiles')
+    .select('user_id, is_shadow, suitability_status, super_role')
+    .in('user_id', hostIds);
+
+  const allowedHosts = new Set(
+    (hosts || [])
+      .filter((h) => {
+        if (h.super_role) return true;
+        const sh = !!h.is_shadow;
+        const activeNormal = h.suitability_status === 'active' && !sh;
+        const shadowHost = h.suitability_status === 'shadow' && sh;
+        return isShadowUser ? shadowHost : activeNormal;
+      })
+      .map((h) => h.user_id),
+  );
+
+  return events.filter((e) => {
+    if (!e.host_id) return !isShadowUser;
+    return allowedHosts.has(e.host_id);
+  });
+}
+
+export async function getUpcomingEvents(isShadowUser = false): Promise<EventRow[]> {
   const today = new Date().toISOString().split('T')[0];
   const { data, error } = await supabase
     .from('events')
@@ -46,10 +77,10 @@ export async function getUpcomingEvents(): Promise<EventRow[]> {
     .gte('date', today)
     .order('date', { ascending: true });
   if (error) throw error;
-  return (data || []) as EventRow[];
+  return filterEventsByHostIsolation((data || []) as EventRow[], isShadowUser);
 }
 
-export async function getPastEvents(): Promise<EventRow[]> {
+export async function getPastEvents(isShadowUser = false): Promise<EventRow[]> {
   const { data, error } = await supabase
     .from('events')
     .select('*')
@@ -57,7 +88,7 @@ export async function getPastEvents(): Promise<EventRow[]> {
     .order('date', { ascending: false })
     .limit(20);
   if (error) throw error;
-  return (data || []) as EventRow[];
+  return filterEventsByHostIsolation((data || []) as EventRow[], isShadowUser);
 }
 
 export interface CalendarEvent extends EventRow {
@@ -72,6 +103,7 @@ export async function getCalendarEvents(
   startDate: string,
   endDate: string,
   currentUserId?: string,
+  isShadowUser = false,
 ): Promise<CalendarEvent[]> {
   const { data: events, error } = await supabase
     .from('events')
@@ -83,6 +115,8 @@ export async function getCalendarEvents(
   if (error) throw error;
   if (!events || events.length === 0) return [];
 
+  const filtered = await filterEventsByHostIsolation(events as EventRow[], isShadowUser);
+
   let myEventIds = new Set<string>();
   if (currentUserId) {
     const { data: regs } = await supabase
@@ -93,7 +127,7 @@ export async function getCalendarEvents(
     if (regs) myEventIds = new Set(regs.map(r => r.event_id));
   }
 
-  return (events as EventRow[]).map(e => ({
+  return filtered.map(e => ({
     ...e,
     is_mine: myEventIds.has(e.id),
   }));

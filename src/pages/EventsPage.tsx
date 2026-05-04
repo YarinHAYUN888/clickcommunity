@@ -6,6 +6,7 @@ import EventsCalendarView from '@/components/clicks/EventsCalendarView';
 import { getUpcomingEvents, getPastEvents, EventRow } from '@/services/events';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useUserMode } from '@/hooks/useUserMode';
 
 type TabId = 'upcoming' | 'past' | 'calendar';
 
@@ -20,6 +21,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { authId } = useCurrentUser();
+  const { isShadowUser } = useUserMode();
 
   useEffect(() => {
     if (tab === 'calendar') {
@@ -28,12 +30,15 @@ export default function EventsPage() {
       return;
     }
     setLoading(true);
-    const fetch = tab === 'upcoming' ? getUpcomingEvents : getPastEvents;
+    const fetch =
+      tab === 'upcoming'
+        ? () => getUpcomingEvents(isShadowUser)
+        : () => getPastEvents(isShadowUser);
     fetch()
       .then(setEvents)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [tab]);
+  }, [tab, isShadowUser]);
 
   return (
     <div className="min-h-screen pb-4">
@@ -86,7 +91,7 @@ export default function EventsPage() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
-              <EventsCalendarView currentUserId={authId || undefined} />
+              <EventsCalendarView currentUserId={authId || undefined} isShadowUser={isShadowUser} />
             </motion.div>
           ) : loading ? (
             <motion.div

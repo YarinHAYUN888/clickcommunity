@@ -16,7 +16,7 @@ function calculateCompatibility(myInterests: string[], theirInterests: string[])
   return { score, shared };
 }
 
-export function useClicksFeed(currentUserId: string, myInterests: string[]) {
+export function useClicksFeed(currentUserId: string, myInterests: string[], isShadowUser: boolean) {
   const [items, setItems] = useState<ClickFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const interestsRef = useRef(myInterests);
@@ -30,10 +30,14 @@ export function useClicksFeed(currentUserId: string, myInterests: string[]) {
 
     setLoading(true);
 
-    const { data, error } = await supabase
+    const q = supabase
       .from('profiles')
       .select('*')
-      .neq('user_id', currentUserId);
+      .neq('user_id', currentUserId)
+      .eq('suitability_status', 'active')
+      .eq('is_shadow', isShadowUser);
+
+    const { data, error } = await q;
 
     if (error || !data) {
       setLoading(false);
@@ -53,7 +57,7 @@ export function useClicksFeed(currentUserId: string, myInterests: string[]) {
 
     setItems(feedItems);
     setLoading(false);
-  }, [currentUserId]);
+  }, [currentUserId, isShadowUser]);
 
   useEffect(() => {
     fetchProfiles();

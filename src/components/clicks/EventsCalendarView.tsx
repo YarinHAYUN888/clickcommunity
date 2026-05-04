@@ -10,6 +10,7 @@ import { getCalendarEvents, CalendarEvent } from '@/services/events';
 
 interface EventsCalendarViewProps {
   currentUserId?: string;
+  isShadowUser?: boolean;
 }
 
 /* ---------- Day cell with event dots ---------- */
@@ -128,7 +129,7 @@ function DayEventRow({ event, index }: { event: CalendarEvent; index: number }) 
 }
 
 /* ---------- Main view ---------- */
-export default function EventsCalendarView({ currentUserId }: EventsCalendarViewProps) {
+export default function EventsCalendarView({ currentUserId, isShadowUser = false }: EventsCalendarViewProps) {
   const [month, setMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -140,7 +141,7 @@ export default function EventsCalendarView({ currentUserId }: EventsCalendarView
     setLoading(true);
     const startDate = format(startOfMonth(month), 'yyyy-MM-dd');
     const endDate = format(endOfMonth(month), 'yyyy-MM-dd');
-    getCalendarEvents(startDate, endDate, currentUserId)
+    getCalendarEvents(startDate, endDate, currentUserId, isShadowUser)
       .then(res => {
         if (active) setEvents(res);
       })
@@ -154,7 +155,7 @@ export default function EventsCalendarView({ currentUserId }: EventsCalendarView
     return () => {
       active = false;
     };
-  }, [month, currentUserId]);
+  }, [month, currentUserId, isShadowUser]);
 
   // Group events by date for fast lookup
   const eventsByDate = useMemo(() => {

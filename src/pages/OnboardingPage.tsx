@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles } from 'lucide-react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { IntroductionQuestionnaireStep } from '@/components/onboarding/IntroductionQuestionnaireStep';
 import OnboardingProgress from '@/components/onboarding/OnboardingProgress';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import BackToLandingButton from '@/components/ui/BackToLandingButton';
@@ -18,9 +19,10 @@ import {
   syncOtpToWebhook,
 } from '@/services/otpDelivery';
 import { invokeCompleteRegistration } from '@/services/completeRegistration';
+import { runUserAnalysis } from '@/services/userSuitability';
 import { uploadOnboardingPhotosFromDataUrls } from '@/services/profile';
 
-const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'account-verification'] as const;
+const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
 type Step = typeof steps[number];
 
 const hebrewMonths = [
@@ -81,6 +83,9 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
   if (data.regionOther !== undefined) profileData.region_other = data.regionOther || null;
   if (data.instagram !== undefined) profileData.instagram = data.instagram || null;
   if (data.tiktok !== undefined) profileData.tiktok = data.tiktok || null;
+  if (data.questionnaireResponses && Object.keys(data.questionnaireResponses).length > 0) {
+    profileData.questionnaire_responses = data.questionnaireResponses as ProfilesInsert['questionnaire_responses'];
+  }
 
   const { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
   if (error) {
@@ -95,6 +100,13 @@ export default function OnboardingPage() {
   const { data, updateData, clearData } = useOnboarding();
   const currentIndex = steps.indexOf(step as Step);
   const progress = ((currentIndex + 1) / steps.length) * 100;
+
+  useEffect(() => {
+    if (!step) return;
+    if (!steps.includes(step as Step)) {
+      navigate('/onboarding/credentials', { replace: true });
+    }
+  }, [step, navigate]);
 
   const [showCelebration, setShowCelebration] = useState(false);
 
@@ -152,6 +164,9 @@ export default function OnboardingPage() {
             {step === 'photos' && <PhotosStep data={data} updateData={updateData} onNext={goNext} />}
             {step === 'about' && <AboutStep data={data} updateData={updateData} onNext={goNext} />}
             {step === 'interests' && <InterestsStep data={data} updateData={updateData} onNext={goNext} />}
+            {step === 'introduction' && (
+              <IntroductionQuestionnaireStep data={data} updateData={updateData} onNext={goNext} />
+            )}
             {step === 'account-verification' && (
               <VerifyStep data={data} updateData={updateData} onComplete={handleRegistrationComplete} />
             )}
@@ -857,6 +872,18 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       firstName: data.firstName,
       lastName: data.lastName,
       referralCode: data.referralCode?.trim() || undefined,
+      profile: {
+        phone: data.phone,
+        dateOfBirth: data.dateOfBirth,
+        gender: data.gender,
+        region: data.region,
+        regionOther: data.regionOther,
+        occupation: data.occupation,
+        bio: data.bio,
+        instagram: data.instagram,
+        tiktok: data.tiktok,
+        interests: data.interests,
+      },
     });
 
     await supabase.auth.signOut({ scope: 'local' });
@@ -875,6 +902,27 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     try {
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
       await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
+      try {
+        await runUserAnalysis(
+          {
+            firstName: data.firstName,
+            lastName: data.lastName,
+            bio: data.bio,
+            occupation: data.occupation,
+            interests: data.interests,
+            region: data.region,
+            regionOther: data.regionOther,
+            instagram: data.instagram,
+            tiktok: data.tiktok,
+            gender: data.gender,
+            photos: photoUrls,
+            questionnaireResponses: data.questionnaireResponses,
+          },
+          uid,
+        );
+      } catch (analysisErr) {
+        console.error('runUserAnalysis failed:', analysisErr);
+      }
     } catch (e) {
       console.error('Profile or photo upload failed:', e);
       throw new Error('profile_save_failed');
@@ -914,9 +962,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         return;
       }
 
-      const showOtpPlain =
-        import.meta.env.DEV || import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true';
-      if (showOtpPlain) {
+      if (import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true') {
         toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
       }
 
@@ -1029,9 +1075,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         console.error('Resend error:', result);
         setOtpError('שליחת הקוד נכשלה.');
       } else {
-        const showOtpPlain =
-          import.meta.env.DEV || import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true';
-        if (showOtpPlain) {
+        if (import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true') {
           toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
         }
         inputRefs.current[0]?.focus();

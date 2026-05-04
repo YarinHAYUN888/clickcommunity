@@ -6,6 +6,7 @@ import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
 import { getAdminStats } from '@/services/admin';
+import { UserReviewSection } from '@/components/admin/UserReviewSection';
 
 function CountUp({ target, duration = 600 }: { target: number; duration?: number }) {
   const [value, setValue] = useState(0);
@@ -77,6 +78,10 @@ export default function AdminDashboardPage() {
               </GlassCard>
             );
           })}
+        </div>
+
+        <div className="mb-4">
+          <UserReviewSection />
         </div>
 
         {/* Nav Cards */}

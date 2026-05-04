@@ -45,6 +45,20 @@ export async function performAdminAction(
   return data;
 }
 
+export async function updateProfileSuitability(
+  targetUserId: string,
+  payload: { suitability_status: 'active' | 'pending' | 'shadow' | 'blocked'; is_shadow: boolean },
+) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      suitability_status: payload.suitability_status,
+      is_shadow: payload.is_shadow,
+    })
+    .eq('user_id', targetUserId);
+  if (error) throw error;
+}
+
 export async function uploadEventCover(eventId: string, file: File) {
   const fileExt = file.name.split('.').pop();
   const filePath = `events/${eventId}/cover-${Date.now()}.${fileExt}`;

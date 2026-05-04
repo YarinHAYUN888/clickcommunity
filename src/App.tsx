@@ -32,6 +32,9 @@ import AdminEventDetailPage from "./pages/admin/AdminEventDetailPage";
 import AdminEventFormPage from "./pages/admin/AdminEventFormPage";
 import AdminChatsPage from "./pages/admin/AdminChatsPage";
 import AdminSubscriptionsPage from "./pages/admin/AdminSubscriptionsPage";
+import PendingReviewPage from "./pages/PendingReviewPage";
+import BlockedPage from "./pages/BlockedPage";
+import SuitabilityGate from "@/components/guards/SuitabilityGate";
 
 const queryClient = new QueryClient();
 
@@ -44,52 +47,50 @@ const App = () => (
         <AdminProvider>
           <BrowserRouter>
             <Routes>
-              {/* Landing page — full-bleed, no shell */}
+              {/* Landing — full-bleed, no shell */}
               <Route path="/" element={<LandingPage />} />
               <Route path="/r/:code" element={<ReferCaptureRedirect />} />
 
-              {/* Everything else uses ResponsiveShell */}
-              <Route
-                path="*"
-                element={
-                  <ResponsiveShell>
-                    <Routes>
-                      <Route path="/welcome" element={<WelcomePage />} />
-                      <Route path="/login" element={<LoginPage />} />
-                      <Route
-                        path="/onboarding/verify"
-                        element={<Navigate to="/onboarding/account-verification" replace />}
-                      />
-                      <Route path="/onboarding/:step" element={<OnboardingPage />} />
+              {/* Single flat tree: avoids nested <Routes> under path="*" (can yield blank matches). */}
+              <Route element={<ResponsiveShell />}>
+                <Route path="/welcome" element={<WelcomePage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                  path="/onboarding/verify"
+                  element={<Navigate to="/onboarding/account-verification" replace />}
+                />
+                <Route path="/onboarding/:step" element={<OnboardingPage />} />
 
-                      <Route element={<MainLayout />}>
-                  <Route path="/clicks" element={<ClicksPage />} />
-                  <Route path="/events" element={<EventsPage />} />
-                  <Route path="/events/:eventId" element={<EventDetailPage />} />
-                  <Route path="/events/:eventId/vote" element={<EventVotePage />} />
-                  <Route path="/chats" element={<ChatsPage />} />
-                  <Route path="/chats/:chatId" element={<ChatConversationPage />} />
-                  <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/profile/edit" element={<EditProfilePage />} />
-                  <Route path="/profile/:userId" element={<ProfilePage />} />
-                  <Route path="/subscription" element={<SubscriptionPage />} />
+                <Route path="/pending-review" element={<PendingReviewPage />} />
+                <Route path="/blocked" element={<BlockedPage />} />
 
-                  {/* Admin routes — inside MainLayout for tab bar */}
-                  <Route path="/admin" element={<AdminDashboardPage />} />
-                  <Route path="/admin/users" element={<AdminUsersPage />} />
-                  <Route path="/admin/events" element={<AdminEventsPage />} />
-                  <Route path="/admin/events/new" element={<AdminEventFormPage />} />
-                  <Route path="/admin/events/:eventId" element={<AdminEventDetailPage />} />
-                  <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
-                  <Route path="/admin/chats" element={<AdminChatsPage />} />
-                  <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
-                      </Route>
+                <Route element={<SuitabilityGate />}>
+                  <Route element={<MainLayout />}>
+                    <Route path="/clicks" element={<ClicksPage />} />
+                    <Route path="/events" element={<EventsPage />} />
+                    <Route path="/events/:eventId" element={<EventDetailPage />} />
+                    <Route path="/events/:eventId/vote" element={<EventVotePage />} />
+                    <Route path="/chats" element={<ChatsPage />} />
+                    <Route path="/chats/:chatId" element={<ChatConversationPage />} />
+                    <Route path="/profile" element={<ProfilePage />} />
+                    <Route path="/profile/edit" element={<EditProfilePage />} />
+                    <Route path="/profile/:userId" element={<ProfilePage />} />
+                    <Route path="/subscription" element={<SubscriptionPage />} />
 
-                      <Route path="*" element={<NotFound />} />
-                    </Routes>
-                  </ResponsiveShell>
-                }
-              />
+                    {/* Admin — inside MainLayout for tab bar */}
+                    <Route path="/admin" element={<AdminDashboardPage />} />
+                    <Route path="/admin/users" element={<AdminUsersPage />} />
+                    <Route path="/admin/events" element={<AdminEventsPage />} />
+                    <Route path="/admin/events/new" element={<AdminEventFormPage />} />
+                    <Route path="/admin/events/:eventId" element={<AdminEventDetailPage />} />
+                    <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
+                    <Route path="/admin/chats" element={<AdminChatsPage />} />
+                    <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
+                  </Route>
+                </Route>
+
+                <Route path="*" element={<NotFound />} />
+              </Route>
             </Routes>
           </BrowserRouter>
         </AdminProvider>

@@ -5,6 +5,7 @@ export interface SupabaseProfile {
   id: string;
   user_id: string;
   first_name: string | null;
+  last_name: string | null;
   phone: string | null;
   date_of_birth: string | null;
   gender: string | null;
@@ -19,6 +20,10 @@ export interface SupabaseProfile {
   profile_completion: number | null;
   super_role: string | null;
   suspended: boolean | null;
+  suitability_status?: string | null;
+  is_shadow?: boolean | null;
+  risk_flags?: unknown;
+  ai_summary?: string | null;
 }
 
 export interface CurrentUser {

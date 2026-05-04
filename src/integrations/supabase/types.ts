@@ -535,6 +535,7 @@ export type Database = {
           referral_disabled: boolean | null
           region: string | null
           region_other: string | null
+          risk_flags: unknown
           role: string | null
           status: string | null
           subscription_status: string | null
@@ -542,6 +543,10 @@ export type Database = {
           suspended: boolean | null
           suspended_at: string | null
           suspended_by: string | null
+          questionnaire_responses: Json
+          suitability_status: string
+          ai_summary: string | null
+          is_shadow: boolean
           tiktok: string | null
           updated_at: string
           user_id: string
@@ -569,6 +574,7 @@ export type Database = {
           referral_disabled?: boolean | null
           region?: string | null
           region_other?: string | null
+          risk_flags?: unknown
           role?: string | null
           status?: string | null
           subscription_status?: string | null
@@ -576,6 +582,10 @@ export type Database = {
           suspended?: boolean | null
           suspended_at?: string | null
           suspended_by?: string | null
+          questionnaire_responses?: Json
+          suitability_status?: string
+          ai_summary?: string | null
+          is_shadow?: boolean
           tiktok?: string | null
           updated_at?: string
           user_id: string
@@ -603,6 +613,7 @@ export type Database = {
           referral_disabled?: boolean | null
           region?: string | null
           region_other?: string | null
+          risk_flags?: unknown
           role?: string | null
           status?: string | null
           subscription_status?: string | null
@@ -610,6 +621,10 @@ export type Database = {
           suspended?: boolean | null
           suspended_at?: string | null
           suspended_by?: string | null
+          questionnaire_responses?: Json
+          suitability_status?: string
+          ai_summary?: string | null
+          is_shadow?: boolean
           tiktok?: string | null
           updated_at?: string
           user_id?: string

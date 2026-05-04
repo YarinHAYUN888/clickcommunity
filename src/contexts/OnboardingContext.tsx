@@ -18,6 +18,8 @@ export interface OnboardingData {
   tiktok: string;
   interests: string[];
   verificationMethod: 'phone' | 'email' | '';
+  /** שאלון היכרות — מפתח = id של השאלה */
+  questionnaireResponses: Record<string, string>;
 }
 
 const defaultData: OnboardingData = {
@@ -38,6 +40,7 @@ const defaultData: OnboardingData = {
   tiktok: '',
   interests: [],
   verificationMethod: '',
+  questionnaireResponses: {},
 };
 
 const STORAGE_KEY = 'clicks_onboarding';
@@ -70,9 +73,19 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           ...parsed,
           referralCode: (parsed.referralCode as string) || refFromStore,
           password: savedPwd,
+          questionnaireResponses: {
+            ...defaultData.questionnaireResponses,
+            ...(typeof parsed.questionnaireResponses === 'object' && parsed.questionnaireResponses
+              ? parsed.questionnaireResponses
+              : {}),
+          },
         };
       }
-      return { ...defaultData, referralCode: refFromStore, password: savedPwd };
+      return {
+        ...defaultData,
+        referralCode: refFromStore,
+        password: savedPwd,
+      };
     } catch {
       /* ignore */
     }

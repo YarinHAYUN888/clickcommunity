@@ -4,12 +4,28 @@ import { supabase } from '@/integrations/supabase/client';
  * Payload expected by Edge Function `complete-registration` (see supabase/functions/complete-registration).
  * Email OTP is validated in the client before this is called; the function does not accept an OTP field.
  */
+/** Onboarding fields synced to profiles (Edge admin upsert + client photo merge). */
+export interface CompleteRegistrationProfilePayload {
+  phone?: string;
+  dateOfBirth?: { day: number; month: number; year: number } | null;
+  gender?: string;
+  region?: string;
+  regionOther?: string;
+  occupation?: string;
+  bio?: string;
+  instagram?: string;
+  tiktok?: string;
+  interests?: string[];
+}
+
 export interface CompleteRegistrationBody {
   email: string;
   password: string;
   firstName?: string;
   lastName?: string;
   referralCode?: string;
+  /** Written to public.profiles by Edge (service role) for brand-new auth users only. */
+  profile?: CompleteRegistrationProfilePayload;
 }
 
 function logInvokeError(scope: string, err: unknown) {

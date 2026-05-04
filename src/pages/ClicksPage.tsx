@@ -8,15 +8,21 @@ import ClicksFeedSkeleton from '@/components/clicks/ClicksFeedSkeleton';
 import IcebreakerSheet from '@/components/clicks/IcebreakerSheet';
 import FullProfileModal from '@/components/clicks/FullProfileModal';
 import { useCurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
+import { useUserMode } from '@/hooks/useUserMode';
 import { useClicksFeed, ClickFeedItem } from '@/hooks/useClicksFeed';
 import { useNavigate } from 'react-router-dom';
 
 export default function ClicksPage() {
   const navigate = useNavigate();
   const { profile: myProfile, role, loading: userLoading } = useCurrentUser();
+  const { isShadowUser } = useUserMode();
   const isMember = role === 'member';
   const myInterests = myProfile?.interests || [];
-  const { items, loading: feedLoading, refresh } = useClicksFeed(myProfile?.user_id || '', myInterests);
+  const { items, loading: feedLoading, refresh } = useClicksFeed(
+    myProfile?.user_id || '',
+    myInterests,
+    isShadowUser,
+  );
   const loading = userLoading || feedLoading;
 
   const [tab, setTab] = useState<'general' | 'event'>('general');
