@@ -29,6 +29,7 @@ import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
 import AdminUsersPage from "./pages/admin/AdminUsersPage";
 import AdminEventsPage from "./pages/admin/AdminEventsPage";
 import AdminEventDetailPage from "./pages/admin/AdminEventDetailPage";
+import AdminEventParticipantsPage from "./pages/admin/AdminEventParticipantsPage";
 import AdminEventFormPage from "./pages/admin/AdminEventFormPage";
 import AdminChatsPage from "./pages/admin/AdminChatsPage";
 import AdminSubscriptionsPage from "./pages/admin/AdminSubscriptionsPage";
@@ -83,6 +84,7 @@ const App = () => (
                     <Route path="/admin/events" element={<AdminEventsPage />} />
                     <Route path="/admin/events/new" element={<AdminEventFormPage />} />
                     <Route path="/admin/events/:eventId" element={<AdminEventDetailPage />} />
+                    <Route path="/admin/events/:eventId/participants" element={<AdminEventParticipantsPage />} />
                     <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
                     <Route path="/admin/chats" element={<AdminChatsPage />} />
                     <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />

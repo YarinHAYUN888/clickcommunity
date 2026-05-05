@@ -127,12 +127,17 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from("events").update({ status: "cancelled" }).eq("id", target_id);
         return respond({});
       }
+      case "delete_event": {
+        await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
+        await supabaseAdmin.from("events").delete().eq("id", target_id);
+        return respond({});
+      }
       case "approve_registration": {
         await supabaseAdmin.from("event_registrations").update({ status: "approved" }).eq("id", target_id);
         return respond({});
       }
       case "reject_registration": {
-        await supabaseAdmin.from("event_registrations").update({ status: "cancelled" }).eq("id", target_id);
+        await supabaseAdmin.from("event_registrations").update({ status: "cancelled", cancelled_at: new Date().toISOString() }).eq("id", target_id);
         return respond({});
       }
       case "move_to_waitlist": {
@@ -142,6 +147,30 @@ Deno.serve(async (req) => {
       case "remove_registration": {
         await supabaseAdmin.from("event_registrations").delete().eq("id", target_id);
         return respond({});
+      }
+      case "checkin_registration": {
+        await supabaseAdmin
+          .from("event_registrations")
+          .update({ status: "checked_in", checked_in_at: new Date().toISOString() })
+          .eq("id", target_id);
+        return respond({});
+      }
+      case "checkin_by_entry_code": {
+        const code = typeof details?.entry_code === "string" ? details.entry_code.trim() : "";
+        const eventId = typeof details?.event_id === "string" ? details.event_id : null;
+        if (!code || !eventId) return respondErr("entry_code and event_id are required");
+        const { data: reg, error: regErr } = await supabaseAdmin
+          .from("event_registrations")
+          .select("id, status")
+          .eq("event_id", eventId)
+          .eq("entry_code", code)
+          .maybeSingle();
+        if (regErr || !reg) return respondErr("Registration not found", 404);
+        await supabaseAdmin
+          .from("event_registrations")
+          .update({ status: "checked_in", checked_in_at: new Date().toISOString() })
+          .eq("id", reg.id);
+        return respond({ registration_id: reg.id });
       }
 
       // ---- Chat Management ----

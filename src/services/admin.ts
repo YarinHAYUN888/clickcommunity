@@ -75,11 +75,30 @@ export async function updateProfileSuitability(
 }
 
 export async function uploadEventCover(eventId: string, file: File) {
+  console.log('UPLOAD FILE:', file);
+
+  if (!file) {
+    throw new Error('No file provided');
+  }
+
   const fileExt = file.name.split('.').pop();
-  const filePath = `events/${eventId}/cover-${Date.now()}.${fileExt}`;
-  const { error } = await supabase.storage.from('photos').upload(filePath, file, { upsert: true });
-  if (error) throw error;
-  const { data } = supabase.storage.from('photos').getPublicUrl(filePath);
+  const filePath = `events/${eventId}-${Date.now()}.${fileExt}`;
+
+  console.log('UPLOAD PATH:', filePath);
+
+  const { error } = await supabase.storage
+    .from('photos')
+    .upload(filePath, file);
+
+  if (error) {
+    console.error('UPLOAD ERROR:', error);
+    throw new Error(error.message);
+  }
+
+  const { data } = supabase.storage
+    .from('photos')
+    .getPublicUrl(filePath);
+
   return data.publicUrl;
 }
 

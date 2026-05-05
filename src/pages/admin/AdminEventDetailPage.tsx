@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowRight, Download, Edit3, X, Check, User } from 'lucide-react';
+import { ArrowRight, Download, Edit3, X, Check, User, Trash2, List } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
@@ -11,12 +11,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 const regStatusColors: Record<string, string> = {
   registered: 'bg-success/10 text-success',
   approved: 'bg-success/10 text-success',
+  checked_in: 'bg-primary/10 text-primary',
   pending: 'bg-warning/10 text-warning',
   waitlist: 'bg-muted text-muted-foreground',
   cancelled: 'bg-destructive/10 text-destructive',
 };
 const regStatusLabels: Record<string, string> = {
-  registered: 'רשום', approved: 'מאושר', pending: 'ממתין', waitlist: 'המתנה', cancelled: 'בוטל',
+  registered: 'רשום', approved: 'מאושר', checked_in: 'נכנס', pending: 'ממתין', waitlist: 'המתנה', cancelled: 'בוטל',
 };
 
 const regFilters = [
@@ -36,6 +37,7 @@ export default function AdminEventDetailPage() {
   const [regFilter, setRegFilter] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const fetchData = async () => {
     if (!eventId) return;
@@ -99,11 +101,17 @@ export default function AdminEventDetailPage() {
           <button onClick={() => exportRegistrationsCSV(registrations)} className="h-9 px-4 rounded-full border border-primary text-primary text-xs font-medium flex items-center gap-1.5 whitespace-nowrap">
             <Download size={14} /> ייצוא
           </button>
+          <button onClick={() => navigate(`/admin/events/${eventId}/participants`)} className="h-9 px-4 rounded-full border border-primary text-primary text-xs font-medium flex items-center gap-1.5 whitespace-nowrap">
+            <List size={14} /> משתתפים
+          </button>
           {event.status !== 'cancelled' && (
             <button onClick={() => setCancelConfirm(true)} className="h-9 px-4 rounded-full border border-destructive text-destructive text-xs font-medium whitespace-nowrap">
               בטל אירוע
             </button>
           )}
+          <button onClick={() => setDeleteConfirm(true)} className="h-9 px-4 rounded-full border border-destructive text-destructive text-xs font-medium flex items-center gap-1.5 whitespace-nowrap">
+            <Trash2 size={14} /> Delete Event
+          </button>
         </div>
 
         {/* Registration Filters */}
@@ -205,6 +213,41 @@ export default function AdminEventDetailPage() {
                 <p className="text-sm text-muted-foreground">פעולה זו תבטל את האירוע לכל הנרשמים</p>
                 <button onClick={() => { doAction('cancel_event', eventId!, 'event'); setCancelConfirm(false); }} className="w-full h-12 rounded-full bg-destructive text-primary-foreground font-semibold">בטל אירוע</button>
                 <button onClick={() => setCancelConfirm(false)} className="w-full h-12 rounded-full gradient-primary text-primary-foreground font-semibold">השאר</button>
+              </GlassCard>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Hard Delete Confirm */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40" onClick={() => setDeleteConfirm(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
+              <GlassCard variant="strong" className="p-6 space-y-4 text-center">
+                <h3 className="text-lg font-bold text-foreground">Delete Event</h3>
+                <p className="text-sm text-muted-foreground">Are you sure you want to delete this event?</p>
+                <button
+                  onClick={async () => {
+                    setActionLoading(true);
+                    try {
+                      await performAdminAction('delete_event', 'event', eventId!);
+                      toast.success('האירוע נמחק בהצלחה');
+                      navigate('/admin/events');
+                    } catch {
+                      toast.error('שגיאה במחיקת אירוע');
+                    } finally {
+                      setActionLoading(false);
+                      setDeleteConfirm(false);
+                    }
+                  }}
+                  disabled={actionLoading}
+                  className="w-full h-12 rounded-full bg-destructive text-primary-foreground font-semibold disabled:opacity-60"
+                >
+                  מחק אירוע לצמיתות
+                </button>
+                <button onClick={() => setDeleteConfirm(false)} className="w-full h-12 rounded-full gradient-primary text-primary-foreground font-semibold">ביטול</button>
               </GlassCard>
             </motion.div>
           </>

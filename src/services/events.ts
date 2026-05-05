@@ -34,6 +34,9 @@ export interface EventRegistration {
   waitlist_position: number | null;
   paid_amount: number | null;
   payment_status: string;
+  entry_code?: string | null;
+  cancelled_at?: string | null;
+  checked_in_at?: string | null;
   created_at: string;
 }
 
@@ -316,6 +319,18 @@ export async function getVotableAttendees(eventId: string, voterId: string) {
 }
 
 export async function registerForEvent(eventId: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, super_role')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+  const role = profile?.super_role ? 'admin' : profile?.role;
+  if (!['member', 'admin'].includes(role || '')) {
+    throw new Error('Registration is available for members only');
+  }
+
   const { data, error } = await supabase.functions.invoke('register-for-event', {
     body: { event_id: eventId },
   });

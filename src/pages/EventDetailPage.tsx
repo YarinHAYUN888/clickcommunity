@@ -12,6 +12,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonner } from 'sonner';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -68,11 +69,25 @@ export default function EventDetailPage() {
 
   const handleRegister = async () => {
     if (!eventId || !authId) return;
+    if (role === 'guest') {
+      sonner('Registration is available for members only', { icon: '🔒' });
+      return;
+    }
     setRegistering(true);
     try {
       const result = await registerForEvent(eventId);
       if (result.success) {
-        setRegistration({ id: '', event_id: eventId, user_id: authId, status: result.registration_status, waitlist_position: result.waitlist_position, paid_amount: null, payment_status: 'unpaid', created_at: '' });
+        setRegistration({
+          id: '',
+          event_id: eventId,
+          user_id: authId,
+          status: result.registration_status,
+          waitlist_position: result.waitlist_position,
+          paid_amount: null,
+          payment_status: 'unpaid',
+          entry_code: result.entry_code || null,
+          created_at: '',
+        });
         if (result.registration_status === 'registered') setShowSuccess(true);
         else toast({ title: `ברשימת המתנה (מקום ${result.waitlist_position})` });
       }
@@ -133,7 +148,11 @@ export default function EventDetailPage() {
   }
 
   const isPast = event.status === 'past';
-  const isRegistered = registration?.status === 'registered' || registration?.status === 'approved';
+  const isRegistered =
+    registration?.status === 'registered' ||
+    registration?.status === 'approved' ||
+    registration?.status === 'checked_in';
+  const canRegister = role === 'member';
 
   const formatDate = (d: string) => {
     const date = new Date(d);
@@ -333,6 +352,19 @@ export default function EventDetailPage() {
           </GlassCard>
         )}
 
+        {/* Event Entry QR */}
+        {isRegistered && registration?.entry_code && (
+          <GlassCard className="p-5 space-y-3 text-center">
+            <h3 className="text-base font-semibold text-foreground">כרטיס כניסה לאירוע</h3>
+            <div className="flex justify-center">
+              <div className="bg-white p-3 rounded-2xl">
+                <QRCodeSVG value={registration.entry_code} size={168} />
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">קוד כניסה: <span className="font-semibold text-foreground">{registration.entry_code}</span></p>
+          </GlassCard>
+        )}
+
         {/* Personalized "Clicks" — visible after registration */}
         {isRegistered && role === 'member' && authId && (
           <EventClicksSection
@@ -401,9 +433,14 @@ export default function EventDetailPage() {
               <button
                 onClick={handleRegister}
                 disabled={registering || !authId}
-                className="w-full rounded-[999px] gradient-primary text-primary-foreground py-3.5 font-semibold text-base active:scale-[0.97] transition-transform disabled:opacity-50"
+                className="w-full rounded-[999px] gradient-primary text-primary-foreground py-3.5 font-semibold text-base active:scale-[0.97] transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {registering ? '...' : event.status === 'full' ? 'הצטרף/י לרשימת המתנה' : 'הירשם/י'}
+                {!canRegister ? (
+                  <>
+                    <Lock size={16} />
+                    הרשמה לחברי קהילה בלבד
+                  </>
+                ) : registering ? '...' : event.status === 'full' ? 'הצטרף/י לרשימת המתנה' : 'הירשם/י'}
               </button>
             )}
           </div>

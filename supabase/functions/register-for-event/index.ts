@@ -1,6 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
+function generateUniqueCode() {
+  return "EVT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -49,6 +53,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, super_role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const role = profile?.super_role ? "admin" : profile?.role;
+    if (!["member", "admin"].includes(role || "")) {
+      return new Response(JSON.stringify({ error: "Registration is available for members only" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Check existing registration
     const { data: existing } = await supabase
       .from("event_registrations")
@@ -85,14 +101,25 @@ Deno.serve(async (req) => {
       regStatus = "registered";
     }
 
-    const { error: insertError } = await supabase
-      .from("event_registrations")
-      .insert({
-        event_id,
-        user_id: user.id,
-        status: regStatus,
-        waitlist_position: waitlistPosition,
-      });
+    let insertError: { message: string } | null = null;
+    let entryCode: string | null = null;
+    for (let i = 0; i < 5; i++) {
+      entryCode = generateUniqueCode();
+      const { error } = await supabase
+        .from("event_registrations")
+        .insert({
+          event_id,
+          user_id: user.id,
+          status: regStatus,
+          waitlist_position: waitlistPosition,
+          entry_code: entryCode,
+        });
+      if (!error) {
+        insertError = null;
+        break;
+      }
+      insertError = { message: error.message };
+    }
 
     if (insertError) {
       return new Response(JSON.stringify({ error: insertError.message }), {
@@ -104,6 +131,7 @@ Deno.serve(async (req) => {
       success: true,
       registration_status: regStatus,
       waitlist_position: waitlistPosition,
+      entry_code: entryCode,
     }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
