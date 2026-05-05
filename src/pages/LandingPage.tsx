@@ -8,7 +8,7 @@ import WhoWeAreSection from '@/components/landing/WhoWeAreSection';
 import ConceptSection from '@/components/landing/ConceptSection';
 import ImpactSection from '@/components/landing/ImpactSection';
 import ForWhomSection from '@/components/landing/ForWhomSection';
-import TestimonialsSection from '@/components/landing/TestimonialsSection';
+import TestimonialsShowcase from '@/components/landing/TestimonialsShowcase';
 import SubscriptionSection from '@/components/landing/SubscriptionSection';
 import BottomLineSection from '@/components/landing/BottomLineSection';
 import SocialSection from '@/components/landing/SocialSection';
@@ -57,7 +57,7 @@ export default function LandingPage() {
         <ConceptSection />
         <ImpactSection />
         <ForWhomSection />
-        <TestimonialsSection />
+        <TestimonialsShowcase />
         <SubscriptionSection />
         <MomentsSection />
         <BottomLineSection />

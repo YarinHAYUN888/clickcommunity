@@ -110,7 +110,7 @@ export default function AdminEventDetailPage() {
             </button>
           )}
           <button onClick={() => setDeleteConfirm(true)} className="h-9 px-4 rounded-full border border-destructive text-destructive text-xs font-medium flex items-center gap-1.5 whitespace-nowrap">
-            <Trash2 size={14} /> Delete Event
+            <Trash2 size={14} /> מחק אירוע
           </button>
         </div>
 
@@ -226,8 +226,8 @@ export default function AdminEventDetailPage() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40" onClick={() => setDeleteConfirm(false)} />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
               <GlassCard variant="strong" className="p-6 space-y-4 text-center">
-                <h3 className="text-lg font-bold text-foreground">Delete Event</h3>
-                <p className="text-sm text-muted-foreground">Are you sure you want to delete this event?</p>
+                <h3 className="text-lg font-bold text-foreground">מחיקת אירוע</h3>
+                <p className="text-sm text-muted-foreground">האם למחוק את האירוע לצמיתות?</p>
                 <button
                   onClick={async () => {
                     setActionLoading(true);
@@ -235,8 +235,8 @@ export default function AdminEventDetailPage() {
                       await performAdminAction('delete_event', 'event', eventId!);
                       toast.success('האירוע נמחק בהצלחה');
                       navigate('/admin/events');
-                    } catch {
-                      toast.error('שגיאה במחיקת אירוע');
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'שגיאה במחיקת אירוע');
                     } finally {
                       setActionLoading(false);
                       setDeleteConfirm(false);

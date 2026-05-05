@@ -128,6 +128,18 @@ Deno.serve(async (req) => {
         return respond({});
       }
       case "delete_event": {
+        const { data: eventChats } = await supabaseAdmin
+          .from("chats")
+          .select("id")
+          .eq("event_id", target_id);
+        const chatIds = (eventChats || []).map((c: { id: string }) => c.id);
+        if (chatIds.length > 0) {
+          await supabaseAdmin.from("messages").delete().in("chat_id", chatIds);
+          await supabaseAdmin.from("chat_participants").delete().in("chat_id", chatIds);
+          await supabaseAdmin.from("chats").delete().in("id", chatIds);
+        }
+        await supabaseAdmin.from("event_votes").delete().eq("event_id", target_id);
+        await supabaseAdmin.from("event_photos").delete().eq("event_id", target_id);
         await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
         await supabaseAdmin.from("events").delete().eq("id", target_id);
         return respond({});
