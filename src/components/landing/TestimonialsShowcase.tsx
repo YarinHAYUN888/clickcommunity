@@ -6,6 +6,10 @@ const testimonials = [
   { image: "/reviews/review-3.png" },
   { image: "/reviews/review-4.png" },
   { image: "/reviews/review-5.png" },
+  { image: "/reviews/review-6.png" },
+  { image: "/reviews/review-7.png" },
+  { image: "/reviews/review-8.png" },
+  { image: "/reviews/review-9.png" },
 ];
 
 export default function TestimonialsShowcase() {
@@ -17,9 +21,7 @@ export default function TestimonialsShowcase() {
           <h2 className="text-3xl md:text-4xl font-extrabold text-black mb-3">
             הם מדברים לבד
           </h2>
-          <p className="text-gray-600 text-sm md:text-base">
-            לקוחות אמיתיים. תוצאות אמיתיות.
-          </p>
+          <p className="text-gray-600 text-sm md:text-base">לקוחות אמיתיים. תוצאות אמיתיות.</p>
         </div>
 
         {/* Grid */}
@@ -42,7 +44,7 @@ export default function TestimonialsShowcase() {
                 scale: { duration: 0.35, ease: "easeOut" },
               }}
               viewport={{ once: true }}
-              className={`group relative rounded-3xl overflow-hidden ${index % 2 === 0 ? "mt-0" : "mt-4 md:mt-6"}`}
+              className={`group relative rounded-3xl overflow-hidden ${index % 2 === 0 ? "mt-0" : "mt-3 md:mt-5"}`}
             >
               {/* Glass Card */}
               <div
@@ -50,10 +52,10 @@ export default function TestimonialsShowcase() {
                   relative
                   rounded-3xl
                   border border-black/10
-                  bg-gradient-to-br from-purple-600/90 to-purple-400/90
+                  bg-gradient-to-br from-purple-600/88 to-purple-400/86
                   backdrop-blur-2xl
                   shadow-[0_12px_42px_rgba(124,58,237,0.26),inset_0_1px_0_rgba(255,255,255,0.25)]
-                  transition-all duration-300
+                  transition-all duration-350
                   group-hover:shadow-[0_0_28px_rgba(124,58,237,0.42),inset_0_1px_0_rgba(255,255,255,0.3)]
                 "
               >
@@ -74,23 +76,9 @@ export default function TestimonialsShowcase() {
                   }}
                 />
 
-                {/* Badge */}
-                <div className="absolute top-3 right-3 z-10">
-                  <span
-                    className="
-                    text-xs font-medium text-white
-                    px-3 py-1 rounded-full
-                    bg-black/20 backdrop-blur
-                    border border-white/20
-                  "
-                  >
-                    לקוח מאומת
-                  </span>
-                </div>
-
                 {/* Image */}
                 <div className="p-3 relative z-[2]">
-                  <div className="rounded-2xl overflow-hidden bg-white">
+                  <div className="rounded-2xl overflow-hidden bg-white aspect-[3/4] md:aspect-[4/5]">
                     <img
                       src={item.image}
                       alt="review"
