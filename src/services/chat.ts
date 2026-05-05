@@ -26,6 +26,32 @@ export interface MessageRow {
   created_at: string;
 }
 
+/** ניווט ל־`/chats/new-…` או אחרי יצירת DM — כותרת מיידית עד טעינת פרופיל מהשרת */
+export interface ChatLocationPartnerPreview {
+  firstName: string;
+  photoUrl: string | null;
+}
+
+export interface ChatLocationState {
+  icebreaker?: string;
+  partnerPreview?: ChatLocationPartnerPreview;
+}
+
+export function partnerPreviewFromProfile(p: {
+  first_name?: string | null;
+  photos?: string[] | null;
+  avatar_url?: string | null;
+}): ChatLocationPartnerPreview {
+  const photo =
+    (Array.isArray(p.photos) && p.photos.length > 0 && p.photos[0]) ||
+    (p.avatar_url && String(p.avatar_url).trim()) ||
+    null;
+  return {
+    firstName: (p.first_name && String(p.first_name).trim()) || 'משתמש/ת',
+    photoUrl: photo,
+  };
+}
+
 /* ── Queries ── */
 
 export async function getDirectChats(userId: string) {
@@ -152,6 +178,54 @@ export async function getTotalUnreadCount(userId: string) {
     total += await getUnreadCount(p.chat_id, userId);
   }
   return total;
+}
+
+/** לכל user_id בפיד קליקים: האם יש בצ׳אט ישיר איתו הודעות שלא נקראו (ממנו). */
+export async function getUnreadMessageFromUserIds(
+  currentUserId: string,
+  candidateUserIds: string[]
+): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  candidateUserIds.forEach((id) => {
+    out[id] = false;
+  });
+  if (!currentUserId || candidateUserIds.length === 0) return out;
+
+  const want = new Set(candidateUserIds);
+
+  const { data: myParts, error: e1 } = await supabase
+    .from('chat_participants')
+    .select('chat_id')
+    .eq('user_id', currentUserId)
+    .eq('removed', false);
+  if (e1 || !myParts?.length) return out;
+
+  const myChatIds = myParts.map((p: { chat_id: string }) => p.chat_id);
+  const { data: directRows, error: e2 } = await supabase
+    .from('chats')
+    .select('id')
+    .in('id', myChatIds)
+    .eq('type', 'direct');
+  if (e2 || !directRows?.length) return out;
+
+  const directIds = new Set(directRows.map((c: { id: string }) => c.id));
+
+  const { data: theirParts, error: e3 } = await supabase
+    .from('chat_participants')
+    .select('chat_id, user_id')
+    .in('chat_id', [...directIds])
+    .eq('removed', false)
+    .neq('user_id', currentUserId);
+  if (e3 || !theirParts?.length) return out;
+
+  for (const row of theirParts as { chat_id: string; user_id: string }[]) {
+    if (!directIds.has(row.chat_id)) continue;
+    const otherId = row.user_id;
+    if (!want.has(otherId)) continue;
+    const n = await getUnreadCount(row.chat_id, currentUserId);
+    if (n > 0) out[otherId] = true;
+  }
+  return out;
 }
 
 export async function getEventForChat(eventId: string) {

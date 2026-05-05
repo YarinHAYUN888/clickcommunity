@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Sparkles, Zap } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
@@ -9,10 +9,12 @@ import FullProfileModal from '@/components/clicks/FullProfileModal';
 import { useCurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
 import { useClicksFeed, ClickFeedItem } from '@/hooks/useClicksFeed';
 import { useNavigate } from 'react-router-dom';
+import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
+import { CHAT_UNREAD_REFRESH_EVENT } from '@/contexts/ChatUnreadContext';
 
 export default function ClicksPage() {
   const navigate = useNavigate();
-  const { profile: myProfile, role, loading: userLoading } = useCurrentUser();
+  const { profile: myProfile, authId, role, loading: userLoading } = useCurrentUser();
   const isMember = role === 'member';
   const myInterests = myProfile?.interests || [];
   const { items, loading: feedLoading, refresh } = useClicksFeed(myProfile?.user_id || '', myInterests);
@@ -34,13 +36,50 @@ export default function ClicksPage() {
   const [pullY, setPullY] = useState(0);
   const touchStartY = useRef(0);
 
+  const feedUserIds = useMemo(() => items.map((i) => i.profile.user_id), [items]);
+  const feedUserIdsKey = feedUserIds.join(',');
+
+  const [unreadFromUser, setUnreadFromUser] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!authId || feedUserIds.length === 0) {
+      setUnreadFromUser({});
+      return;
+    }
+    let cancelled = false;
+    getUnreadMessageFromUserIds(authId, feedUserIds).then((m) => {
+      if (!cancelled) setUnreadFromUser(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authId, feedUserIdsKey]);
+
+  useEffect(() => {
+    if (!authId || feedUserIds.length === 0) return;
+    const refresh = () => {
+      getUnreadMessageFromUserIds(authId, feedUserIds).then(setUnreadFromUser);
+    };
+    window.addEventListener(CHAT_UNREAD_REFRESH_EVENT, refresh);
+    const iv = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, 22000);
+    return () => {
+      window.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, refresh);
+      window.clearInterval(iv);
+    };
+  }, [authId, feedUserIdsKey, feedUserIds.length]);
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     refresh().finally(() => {
       setRefreshing(false);
       setPullY(0);
+      if (authId && feedUserIds.length > 0) {
+        getUnreadMessageFromUserIds(authId, feedUserIds).then(setUnreadFromUser);
+      }
     });
-  }, [refresh]);
+  }, [refresh, authId, feedUserIds, feedUserIds.length]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -148,6 +187,7 @@ export default function ClicksPage() {
                   sharedInterests={item.sharedInterests}
                   index={i}
                   isMember={isMember}
+                  hasUnreadDm={!!unreadFromUser[item.profile.user_id]}
                   onViewProfile={() => { setProfileTarget(item); setProfileOpen(true); }}
                   onIcebreaker={() => { setIcebreakerTarget(item); setIcebreakerOpen(true); }}
                 />
@@ -164,7 +204,14 @@ export default function ClicksPage() {
           onClose={() => setIcebreakerOpen(false)}
           targetProfile={icebreakerTarget.profile}
           sharedInterests={icebreakerTarget.sharedInterests}
-          onSend={(msg) => navigate(`/chats/new-${icebreakerTarget.profile.user_id}`, { state: { icebreaker: msg } })}
+          onSend={(msg) =>
+            navigate(`/chats/new-${icebreakerTarget.profile.user_id}`, {
+              state: {
+                icebreaker: msg,
+                partnerPreview: partnerPreviewFromProfile(icebreakerTarget.profile),
+              },
+            })
+          }
         />
       )}
 

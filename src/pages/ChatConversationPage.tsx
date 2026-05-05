@@ -11,6 +11,7 @@ import {
   markAsRead,
   createOrGetDm,
   MessageRow,
+  type ChatLocationState,
 } from '@/services/chat';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -38,14 +39,25 @@ function parseNewDmUserId(routeChatId: string): string | null {
   return USER_UUID_RE.test(uid) ? uid : null;
 }
 
+function readPartnerPreview(state: unknown): { name: string; avatar: string | null } | null {
+  if (!state || typeof state !== 'object') return null;
+  const pv = (state as ChatLocationState).partnerPreview;
+  if (!pv) return null;
+  return {
+    name: pv.firstName?.trim() || 'משתמש/ת',
+    avatar: pv.photoUrl || null,
+  };
+}
+
 export default function ChatConversationPage() {
   const { chatId } = useParams<{ chatId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { authId } = useCurrentUser();
   const [messages, setMessages] = useState<MessageRow[]>([]);
-  const [partnerName, setPartnerName] = useState('');
-  const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
+  const previewInit = readPartnerPreview(location.state);
+  const [partnerName, setPartnerName] = useState(() => previewInit?.name || '');
+  const [partnerAvatar, setPartnerAvatar] = useState<string | null>(() => previewInit?.avatar ?? null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [chatClosed, setChatClosed] = useState(false);
@@ -53,6 +65,14 @@ export default function ChatConversationPage() {
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const p = readPartnerPreview(location.state);
+    if (p) {
+      setPartnerName(p.name);
+      setPartnerAvatar(p.avatar);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -87,7 +107,10 @@ export default function ChatConversationPage() {
           if (cancelled) return;
           const realId = result?.chat_id;
           if (!realId) throw new Error('לא התקבל מזהה צ׳אט מהשרת');
-          navigate(`/chats/${realId}`, { replace: true });
+          const st = location.state;
+          const nextState =
+            typeof st === 'object' && st !== null ? { ...(st as object), icebreaker: undefined } : {};
+          navigate(`/chats/${realId}`, { replace: true, state: nextState });
           return;
         } catch (err) {
           console.error('Open DM error:', err);
@@ -118,8 +141,8 @@ export default function ChatConversationPage() {
         if (!chatData || chatData.type === 'direct') {
           const partner = await getDmPartner(chatId, authId);
           if (partner) {
-            setPartnerName(partner.first_name || 'משתמש/ת');
-            setPartnerAvatar(partner.photos?.[0] || partner.avatar_url || null);
+            setPartnerName((prev) => partner.first_name?.trim() || prev || 'משתמש/ת');
+            setPartnerAvatar((prev) => partner.photos?.[0] || partner.avatar_url || prev);
           }
         }
 

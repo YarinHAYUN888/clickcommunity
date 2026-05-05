@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, Users, Lock, Calendar } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -13,6 +13,8 @@ import {
   ChatRow,
   MessageRow,
 } from '@/services/chat';
+import { supabase } from '@/integrations/supabase/client';
+import { CHAT_UNREAD_REFRESH_EVENT } from '@/contexts/ChatUnreadContext';
 
 function formatTime(dateStr: string) {
   const d = new Date(dateStr);
@@ -46,18 +48,15 @@ interface GroupRowData {
 
 export default function ChatsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { authId, role, loading: userLoading } = useCurrentUser();
   const [tab, setTab] = useState<'direct' | 'group'>('direct');
   const [dms, setDms] = useState<DmRowData[]>([]);
   const [groups, setGroups] = useState<GroupRowData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadChats = useCallback(async () => {
     if (!authId) return;
-    loadChats();
-  }, [authId, tab]);
-
-  async function loadChats() {
     setLoading(true);
     try {
       if (tab === 'direct') {
@@ -105,7 +104,60 @@ export default function ChatsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [authId, tab]);
+
+  const loadChatsRef = useRef(loadChats);
+  loadChatsRef.current = loadChats;
+
+  useEffect(() => {
+    if (!authId) return;
+    if (location.pathname !== '/chats') return;
+    loadChats();
+  }, [authId, tab, loadChats, location.pathname, location.key]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && location.pathname === '/chats') loadChatsRef.current();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const fn = () => loadChatsRef.current();
+    window.addEventListener(CHAT_UNREAD_REFRESH_EVENT, fn);
+    return () => window.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, fn);
+  }, []);
+
+  useEffect(() => {
+    if (!authId) return;
+    const iv = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && location.pathname === '/chats') loadChatsRef.current();
+    }, 22000);
+    return () => window.clearInterval(iv);
+  }, [authId, location.pathname]);
+
+  const dmChatIdsKey = useMemo(() => dms.map((d) => d.chat.id).sort().join(','), [dms]);
+
+  useEffect(() => {
+    if (!authId || tab !== 'direct') return;
+    const ids = dms.map((d) => d.chat.id);
+    if (ids.length === 0) return;
+
+    const ch = supabase.channel(`chats-page-msgs-${authId}-${dmChatIdsKey.slice(0, 48)}`);
+    ids.forEach((chatId) => {
+      ch.on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+        () => loadChatsRef.current()
+      );
+    });
+    ch.subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [authId, tab, dmChatIdsKey]);
 
   // Guest lock screen
   if (!userLoading && role === 'guest') {
@@ -198,7 +250,16 @@ export default function ChatsPage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    onClick={() => navigate(`/chats/${dm.chat.id}`)}
+                    onClick={() =>
+                      navigate(`/chats/${dm.chat.id}`, {
+                        state: {
+                          partnerPreview: {
+                            firstName: dm.partnerName,
+                            photoUrl: dm.partnerAvatar,
+                          },
+                        },
+                      })
+                    }
                     className="flex items-center gap-3 w-full px-5 py-3.5 text-right hover:bg-muted/30 transition-colors"
                   >
                     <div className="relative flex-shrink-0">

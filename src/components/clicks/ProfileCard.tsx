@@ -11,6 +11,7 @@ import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import { toast } from 'sonner';
 import PremiumButton from '@/components/ui/PremiumButton';
 import { springs } from '@/lib/motion';
+import { partnerPreviewFromProfile } from '@/services/chat';
 
 interface ProfileCardProps {
   profile: SupabaseProfile;
@@ -19,6 +20,8 @@ interface ProfileCardProps {
   index: number;
   isMember: boolean;
   showEventBanner?: string;
+  /** יש הודעה שלא נקראה ממנו בצ׳אט ישיר */
+  hasUnreadDm?: boolean;
   onViewProfile: () => void;
   onIcebreaker: () => void;
 }
@@ -30,6 +33,7 @@ export default function ProfileCard({
   index,
   isMember,
   showEventBanner,
+  hasUnreadDm,
   onViewProfile,
   onIcebreaker,
 }: ProfileCardProps) {
@@ -50,7 +54,9 @@ export default function ProfileCard({
       toast('שליחת הודעות זמינה לחברי קהילה בלבד', { icon: '🔒' });
       return;
     }
-    navigate(`/chats/new-${profile.user_id}`);
+    navigate(`/chats/new-${profile.user_id}`, {
+      state: { partnerPreview: partnerPreviewFromProfile(profile) },
+    });
   };
 
   const photoSrc = profile.photos?.[0] || profile.avatar_url || '';
@@ -82,6 +88,15 @@ export default function ProfileCard({
 
         {/* Photo section */}
         <div className="relative overflow-hidden cursor-pointer" style={{ height: 320 }} onClick={onViewProfile}>
+          {hasUnreadDm && (
+            <div
+              className="absolute top-3 end-3 z-20 flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-2.5 py-1 shadow-lg border border-background"
+              title="יש הודעה שלא נקראה"
+            >
+              <MessageCircle size={14} className="shrink-0" />
+              <span className="text-[11px] font-bold leading-none">הודעה</span>
+            </div>
+          )}
           {photoSrc ? (
             <motion.img
               src={photoSrc}

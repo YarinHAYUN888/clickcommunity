@@ -7,6 +7,7 @@ import InterestPill from './InterestPill';
 import CompatibilityArc from './CompatibilityArc';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { partnerPreviewFromProfile } from '@/services/chat';
 
 interface FullProfileModalProps {
   open: boolean;
@@ -45,7 +46,9 @@ export default function FullProfileModal({
       toast('שליחת הודעות זמינה לחברי קהילה בלבד', { icon: '🔒' });
       return;
     }
-    navigate(`/chats/new-${profile.user_id}`);
+    navigate(`/chats/new-${profile.user_id}`, {
+      state: { partnerPreview: partnerPreviewFromProfile(profile) },
+    });
     onClose();
   };
 
