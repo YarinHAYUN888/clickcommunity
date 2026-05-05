@@ -21,11 +21,10 @@ export default function TestimonialsShowcase() {
           <h2 className="text-3xl md:text-4xl font-extrabold text-black mb-3">
             הם מדברים לבד
           </h2>
-          <p className="text-gray-600 text-sm md:text-base">לקוחות אמיתיים. תוצאות אמיתיות.</p>
         </div>
 
-        {/* Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+        {/* Carousel on mobile / Grid on desktop */}
+        <div className="flex gap-5 overflow-x-auto snap-x snap-mandatory pb-3 -mx-1 px-1 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible md:snap-none">
           {testimonials.map((item, index) => (
             <motion.div
               key={index}
@@ -36,7 +35,7 @@ export default function TestimonialsShowcase() {
               transition={{
                 opacity: { delay: index * 0.1, duration: 0.5 },
                 y: {
-                  duration: 4 + (index % 2) * 0.4,
+                  duration: 4.6 + (index % 2) * 0.35,
                   repeat: Infinity,
                   ease: "easeInOut",
                   delay: index * 0.2,
@@ -44,7 +43,9 @@ export default function TestimonialsShowcase() {
                 scale: { duration: 0.35, ease: "easeOut" },
               }}
               viewport={{ once: true }}
-              className={`group relative rounded-3xl overflow-hidden ${index % 2 === 0 ? "mt-0" : "mt-3 md:mt-5"}`}
+              className={`group relative rounded-3xl overflow-hidden shrink-0 basis-[86%] snap-center md:basis-auto ${
+                index % 2 === 0 ? "mt-0" : "mt-2 md:mt-5"
+              }`}
             >
               {/* Glass Card */}
               <div
@@ -52,13 +53,21 @@ export default function TestimonialsShowcase() {
                   relative
                   rounded-3xl
                   border border-black/10
-                  bg-gradient-to-br from-purple-600/88 to-purple-400/86
-                  backdrop-blur-2xl
-                  shadow-[0_12px_42px_rgba(124,58,237,0.26),inset_0_1px_0_rgba(255,255,255,0.25)]
-                  transition-all duration-350
-                  group-hover:shadow-[0_0_28px_rgba(124,58,237,0.42),inset_0_1px_0_rgba(255,255,255,0.3)]
+                  bg-gradient-to-br from-[#7C3AED]/92 via-[#8B5CF6]/88 to-[#A78BFA]/84
+                  backdrop-blur-3xl
+                  shadow-[0_14px_42px_rgba(124,58,237,0.30),0_0_0_1px_rgba(255,255,255,0.20)_inset]
+                  transition-all duration-300
+                  group-hover:shadow-[0_18px_52px_rgba(124,58,237,0.36),0_0_34px_rgba(124,58,237,0.32),0_0_0_1px_rgba(255,255,255,0.26)_inset]
                 "
               >
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-3xl"
+                  style={{
+                    background:
+                      "radial-gradient(80% 60% at 20% 0%, rgba(255,255,255,0.18), transparent 65%), radial-gradient(80% 60% at 100% 100%, rgba(167,139,250,0.18), transparent 70%)",
+                  }}
+                />
                 {/* Soft light sweep */}
                 <motion.div
                   aria-hidden
@@ -69,7 +78,7 @@ export default function TestimonialsShowcase() {
                   }}
                   animate={{ x: ["-120%", "140%"] }}
                   transition={{
-                    duration: 5.5,
+                    duration: 6.2,
                     repeat: Infinity,
                     ease: "linear",
                     delay: index * 0.35,
@@ -78,7 +87,7 @@ export default function TestimonialsShowcase() {
 
                 {/* Image */}
                 <div className="p-3 relative z-[2]">
-                  <div className="rounded-2xl overflow-hidden bg-white aspect-[3/4] md:aspect-[4/5]">
+                  <div className="rounded-2xl overflow-hidden bg-white/95 aspect-[3/4] md:aspect-[4/5] ring-1 ring-black/5">
                     <img
                       src={item.image}
                       alt="review"
