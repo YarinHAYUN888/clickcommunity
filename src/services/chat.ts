@@ -126,23 +126,29 @@ export async function getGroupChats(userId: string) {
 
 /** Partner profile for DM header / list; may be partial if RLS still hides columns (use participant fallback). */
 export async function getDmPartner(chatId: string, currentUserId: string) {
-  const { data: row, error } = await supabase
+  const { data: rows, error } = await supabase
     .from('chat_participants')
-    .select('user_id')
+    .select('user_id, joined_at')
     .eq('chat_id', chatId)
     .eq('removed', false)
     .neq('user_id', currentUserId)
+    .order('joined_at', { ascending: false });
+
+  if (error || !rows?.length) return null;
+  const partnerUserId = rows[0].user_id;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('user_id, first_name, last_name, photos, avatar_url')
+    .eq('user_id', partnerUserId)
     .maybeSingle();
-
-  if (error || !row?.user_id) return null;
-
-  const { data: profile } = await supabase.from('profiles').select('*').eq('user_id', row.user_id).maybeSingle();
 
   if (profile) return profile;
 
   return {
-    user_id: row.user_id,
+    user_id: partnerUserId,
     first_name: null as string | null,
+    last_name: null as string | null,
     photos: null as string[] | null,
     avatar_url: null as string | null,
   };
