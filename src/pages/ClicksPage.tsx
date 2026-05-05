@@ -17,7 +17,8 @@ export default function ClicksPage() {
   const { profile: myProfile, authId, role, loading: userLoading } = useCurrentUser();
   const isMember = role === 'member';
   const myInterests = myProfile?.interests || [];
-  const { items, loading: feedLoading, refresh } = useClicksFeed(myProfile?.user_id || '', myInterests);
+  /** חובה להשתמש ב-authId מהסשן — לא ב-myProfile.user_id: אחרת כשטעינת הפרופיל מתעכבת הפיד יוצא ריק לצמיתות */
+  const { items, loading: feedLoading, refresh } = useClicksFeed(authId, myInterests);
   const loading = userLoading || feedLoading;
 
   const [tab, setTab] = useState<'general' | 'event'>('general');
