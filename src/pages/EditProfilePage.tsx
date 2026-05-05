@@ -37,6 +37,11 @@ export default function EditProfilePage() {
       setAuthId(session.user.id);
       try {
         const p = await getMyProfile(session.user.id);
+        if (!p) {
+          toast.error('לא נמצא פרופיל במסד. נסו לרענן או לפנות לתמיכה.');
+          setLoading(false);
+          return;
+        }
         setFirstName(p.first_name || '');
         setOccupation(p.occupation || '');
         setBio(p.bio || '');

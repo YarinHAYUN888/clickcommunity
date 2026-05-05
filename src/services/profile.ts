@@ -5,8 +5,11 @@ export async function getMyProfile(userId: string) {
     .from('profiles')
     .select('*')
     .eq('user_id', userId)
-    .single();
-  if (error) throw error;
+    .maybeSingle();
+  if (error) {
+    console.error('getMyProfile:', error.message, error);
+    throw error;
+  }
   return data;
 }
 
@@ -15,7 +18,7 @@ export async function getUserProfile(userId: string) {
     .from('profiles')
     .select('id, first_name, date_of_birth, gender, occupation, bio, photos, interests, status, role, profile_completion, created_at')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
   if (error) throw error;
   return data;
 }

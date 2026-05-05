@@ -75,6 +75,7 @@ export default function ProfilePage() {
   const [stats, setStats] = useState<ProfileStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [noSession, setNoSession] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
 
   useEffect(() => {
@@ -82,31 +83,47 @@ export default function ProfilePage() {
 
     (async () => {
       try {
+        setLoadError(null);
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) {
-          if (mounted) { setNoSession(true); setLoading(false); }
+          if (mounted) {
+            setNoSession(true);
+            setLoading(false);
+          }
           return;
         }
         const uid = paramUserId || session.user.id;
 
-        // Load profile first (fast DB query), show page immediately
         const profileData = await getMyProfile(uid);
-        if (mounted) {
-          setProfile(profileData);
-          setLoading(false); // Show the page NOW
+        if (!mounted) return;
+
+        if (!profileData) {
+          setProfile(null);
+          setLoadError('לא נמצא פרופיל במסד הנתונים לחשבון זה. נסו להתחבר מחדש או ליצור קשר עם התמיכה.');
+          setLoading(false);
+          return;
         }
 
-        // Load stats in background (edge function, can be slow)
+        setProfile(profileData);
+        setLoading(false);
+
         getProfileStats(uid)
-          .then(statsData => { if (mounted) setStats(statsData); })
-          .catch(err => console.error('Stats load error:', err));
+          .then((statsData) => {
+            if (mounted) setStats(statsData);
+          })
+          .catch((err) => console.error('Stats load error:', err));
       } catch (e) {
         console.error('Profile load error:', e);
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoadError(e instanceof Error ? e.message : 'שגיאה בטעינת הפרופיל');
+          setLoading(false);
+        }
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [paramUserId]);
 
   if (noSession) {
@@ -122,6 +139,22 @@ export default function ProfilePage() {
 
   if (loading) {
     return <SpinnerOverlay />;
+  }
+
+  if (loadError || !profile) {
+    return (
+      <div className="min-h-screen gradient-bg pb-24 flex flex-col items-center justify-center px-6">
+        <p className="text-destructive text-center mb-2 font-medium">לא ניתן לטעון את הפרופיל</p>
+        <p className="text-muted-foreground text-center text-sm mb-6 max-w-sm">{loadError || 'אין נתונים'}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="px-6 py-3 rounded-full font-medium text-primary-foreground gradient-primary"
+        >
+          רענון והצגה מחדש
+        </button>
+      </div>
+    );
   }
 
   const photos = profile?.photos?.length ? profile.photos : (profile?.avatar_url ? [profile.avatar_url] : []);

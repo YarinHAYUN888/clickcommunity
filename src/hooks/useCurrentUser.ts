@@ -47,9 +47,14 @@ export function useCurrentUser(): CurrentUser {
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
-        .single()
-        .then(({ data }) => {
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error) console.error('useCurrentUser fetchProfile:', error.message);
           if (mountedRef.current && data) setProfile(data as SupabaseProfile);
+          if (mountedRef.current) setLoading(false);
+        })
+        .catch((e) => {
+          console.error('useCurrentUser fetchProfile failed:', e);
           if (mountedRef.current) setLoading(false);
         });
     };
