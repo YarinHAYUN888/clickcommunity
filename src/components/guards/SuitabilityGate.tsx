@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
@@ -23,8 +23,12 @@ export default function SuitabilityGate() {
     }
   }, [loading, authId, profile?.suitability_status, profile?.super_role, navigate]);
 
-  if (loading && authId) {
+  if (loading) {
     return <SpinnerOverlay />;
+  }
+
+  if (!authId) {
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

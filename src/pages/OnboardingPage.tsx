@@ -137,7 +137,16 @@ export default function OnboardingPage() {
         <OnboardingProgress progress={progress} />
       </div>
 
-      <BackToLandingButton />
+      <BackToLandingButton
+        onBeforeNavigate={async () => {
+          try {
+            await supabase.auth.signOut({ scope: 'local' });
+          } catch {
+            /* ignore */
+          }
+          clearData();
+        }}
+      />
 
       <div className="px-4 pt-3">
         <motion.button
@@ -858,7 +867,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const completeRegistration = useCallback(async () => {
+  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean }> => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
 
@@ -899,6 +908,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     }
 
     const uid = verifyData.user.id;
+    let profileSyncFailed = false;
     try {
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
       await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
@@ -925,7 +935,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       }
     } catch (e) {
       console.error('Profile or photo upload failed:', e);
-      throw new Error('profile_save_failed');
+      profileSyncFailed = true;
     }
 
     const refRaw =
@@ -941,6 +951,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     } catch (e) {
       console.warn('claim-signup-rewards:', e);
     }
+    return { profileSyncFailed };
   }, [data]);
 
   const handleSendCode = useCallback(async () => {
@@ -1020,7 +1031,10 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         return;
       }
 
-      await completeRegistration();
+      const result = await completeRegistration();
+      if (result.profileSyncFailed) {
+        toast.warning('החשבון נוצר בהצלחה, אך סנכרון פרטי הפרופיל נכשל. ניתן להשלים/לעדכן בפרופיל.');
+      }
       onComplete();
     } catch (e) {
       console.error('Verify exception:', e);

@@ -7,6 +7,8 @@ interface BackToLandingButtonProps {
   to?: string;
   /** Optional className override. */
   className?: string;
+  /** Optional callback before navigation (can be async). */
+  onBeforeNavigate?: () => void | Promise<void>;
 }
 
 /**
@@ -16,13 +18,16 @@ interface BackToLandingButtonProps {
  * Visually fixed to the left edge regardless of RTL/LTR direction
  * (uses `left-3` literally, not `start-3`).
  */
-export default function BackToLandingButton({ to = '/', className = '' }: BackToLandingButtonProps) {
+export default function BackToLandingButton({ to = '/', className = '', onBeforeNavigate }: BackToLandingButtonProps) {
   const navigate = useNavigate();
 
   return (
     <motion.button
       type="button"
-      onClick={() => navigate(to)}
+      onClick={async () => {
+        if (onBeforeNavigate) await onBeforeNavigate();
+        navigate(to);
+      }}
       whileTap={{ scale: 0.92 }}
       whileHover={{ scale: 1.05 }}
       initial={{ opacity: 0, y: -6 }}
