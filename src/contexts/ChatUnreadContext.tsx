@@ -44,16 +44,17 @@ export function ChatUnreadProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onVisible = () => void refreshChatUnread();
-    window.addEventListener('focus', onVisible);
-    document.addEventListener('visibilitychange', () => {
+    const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') void refreshChatUnread();
-    });
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     const interval = window.setInterval(() => void refreshChatUnread(), 25000);
     const onCustom = () => void refreshChatUnread();
     window.addEventListener(CHAT_UNREAD_REFRESH_EVENT, onCustom);
     return () => {
       window.removeEventListener('focus', onVisible);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.clearInterval(interval);
       window.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, onCustom);
     };

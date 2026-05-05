@@ -18,7 +18,7 @@ const subFilters = [
 
 export default function AdminSubscriptionsPage() {
   const navigate = useNavigate();
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [stats, setStats] = useState<any>(null);
   const [subs, setSubs] = useState<any[]>([]);
   const [filter, setFilter] = useState('');
@@ -38,9 +38,10 @@ export default function AdminSubscriptionsPage() {
   };
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     fetchData();
-  }, [isSuperUser]);
+  }, [adminLoading, isSuperUser, navigate]);
 
   const filteredSubs = subs.filter(s => {
     if (!filter) return true;
@@ -61,7 +62,7 @@ export default function AdminSubscriptionsPage() {
     setActionLoading(false);
   };
 
-  if (loading) return <SpinnerOverlay />;
+  if (adminLoading || loading) return <SpinnerOverlay />;
 
   return (
     <div className="min-h-screen gradient-bg pb-24">

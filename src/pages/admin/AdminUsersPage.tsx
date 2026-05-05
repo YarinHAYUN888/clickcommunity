@@ -32,7 +32,7 @@ const statusConfig: Record<string, { label: string; bg: string; text: string }> 
 
 export default function AdminUsersPage() {
   const navigate = useNavigate();
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [users, setUsers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -59,9 +59,10 @@ export default function AdminUsersPage() {
   }, [filter, search, page]);
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     fetchUsers();
-  }, [isSuperUser, fetchUsers]);
+  }, [adminLoading, isSuperUser, fetchUsers, navigate]);
 
   useEffect(() => {
     const timer = setTimeout(() => { setPage(1); fetchUsers(); }, 300);

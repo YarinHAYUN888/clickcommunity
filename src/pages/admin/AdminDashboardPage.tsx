@@ -45,16 +45,17 @@ function getNestedValue(obj: any, path: string): number {
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
-  const { superRole, isSuperUser } = useAdmin();
+  const { superRole, isSuperUser, loading: adminLoading } = useAdmin();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     getAdminStats().then(setStats).catch(console.error).finally(() => setLoading(false));
-  }, [isSuperUser]);
+  }, [adminLoading, isSuperUser, navigate]);
 
-  if (loading) return <SpinnerOverlay />;
+  if (adminLoading || loading) return <SpinnerOverlay />;
 
   return (
     <div className="min-h-screen gradient-bg pb-24">

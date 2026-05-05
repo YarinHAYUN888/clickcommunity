@@ -30,7 +30,7 @@ const regFilters = [
 export default function AdminEventDetailPage() {
   const navigate = useNavigate();
   const { eventId } = useParams();
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [regFilter, setRegFilter] = useState('');
@@ -47,9 +47,10 @@ export default function AdminEventDetailPage() {
   };
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     fetchData();
-  }, [isSuperUser, eventId]);
+  }, [adminLoading, isSuperUser, eventId, navigate]);
 
   const doAction = async (action: string, targetId: string, targetType = 'event', details?: any) => {
     setActionLoading(true);
@@ -61,7 +62,7 @@ export default function AdminEventDetailPage() {
     setActionLoading(false);
   };
 
-  if (loading) return <SpinnerOverlay />;
+  if (adminLoading || loading) return <SpinnerOverlay />;
   if (!data) return null;
 
   const { event, registrations, stats, votes } = data;

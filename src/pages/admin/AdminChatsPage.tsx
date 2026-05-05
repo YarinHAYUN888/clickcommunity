@@ -11,13 +11,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 export default function AdminChatsPage() {
   const navigate = useNavigate();
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [chats, setChats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChat, setSelectedChat] = useState<any>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     (async () => {
       const { data } = await supabase
@@ -27,7 +28,7 @@ export default function AdminChatsPage() {
       setChats(data || []);
       setLoading(false);
     })();
-  }, [isSuperUser]);
+  }, [adminLoading, isSuperUser, navigate]);
 
   const doAction = async (action: string, chatId: string, details?: any) => {
     setActionLoading(true);
@@ -57,7 +58,7 @@ export default function AdminChatsPage() {
           <h1 className="text-xl font-bold text-foreground">ניהול צ׳אטים</h1>
         </div>
 
-        {loading ? (
+        {adminLoading || loading ? (
           <div className="flex justify-center py-12"><LumaSpin size={48} /></div>
         ) : chats.length === 0 ? (
           <p className="text-center text-muted-foreground py-8 text-sm">אין צ׳אטים</p>

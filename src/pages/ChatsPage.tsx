@@ -108,6 +108,21 @@ export default function ChatsPage() {
 
   const loadChatsRef = useRef(loadChats);
   loadChatsRef.current = loadChats;
+  const reloadTimerRef = useRef<number | null>(null);
+
+  const scheduleReload = useCallback(() => {
+    if (reloadTimerRef.current) window.clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = window.setTimeout(() => {
+      loadChatsRef.current();
+      reloadTimerRef.current = null;
+    }, 120);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (reloadTimerRef.current) window.clearTimeout(reloadTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!authId) return;
@@ -137,6 +152,22 @@ export default function ChatsPage() {
     return () => window.clearInterval(iv);
   }, [authId, location.pathname]);
 
+  useEffect(() => {
+    if (!authId) return;
+    const membershipChannel = supabase
+      .channel(`chat-membership-${authId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_participants', filter: `user_id=eq.${authId}` },
+        () => scheduleReload()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(membershipChannel);
+    };
+  }, [authId, scheduleReload]);
+
   const dmChatIdsKey = useMemo(() => dms.map((d) => d.chat.id).sort().join(','), [dms]);
 
   useEffect(() => {
@@ -149,7 +180,7 @@ export default function ChatsPage() {
       ch.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-        () => loadChatsRef.current()
+        () => scheduleReload()
       );
     });
     ch.subscribe();

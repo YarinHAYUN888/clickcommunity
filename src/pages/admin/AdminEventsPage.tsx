@@ -19,11 +19,12 @@ const statusLabels: Record<string, string> = {
 
 export default function AdminEventsPage() {
   const navigate = useNavigate();
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     (async () => {
       const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
@@ -33,7 +34,7 @@ export default function AdminEventsPage() {
       setEvents([...upcoming, ...past]);
       setLoading(false);
     })();
-  }, [isSuperUser]);
+  }, [adminLoading, isSuperUser, navigate]);
 
   return (
     <div className="min-h-screen gradient-bg pb-24">

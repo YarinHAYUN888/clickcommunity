@@ -43,6 +43,7 @@ export function useCurrentUser(): CurrentUser {
     mountedRef.current = true;
 
     const fetchProfile = (userId: string) => {
+      if (mountedRef.current) setLoading(true);
       supabase
         .from('profiles')
         .select('*')
@@ -50,7 +51,7 @@ export function useCurrentUser(): CurrentUser {
         .maybeSingle()
         .then(({ data, error }) => {
           if (error) console.error('useCurrentUser fetchProfile:', error.message);
-          if (mountedRef.current && data) setProfile(data as SupabaseProfile);
+          if (mountedRef.current) setProfile((data as SupabaseProfile | null) ?? null);
           if (mountedRef.current) setLoading(false);
         })
         .catch((e) => {
@@ -62,6 +63,7 @@ export function useCurrentUser(): CurrentUser {
     // Set up listener BEFORE getSession to avoid missing events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
+        if (mountedRef.current) setProfile(null);
         setAuthId(session.user.id);
         fetchProfile(session.user.id);
       } else {

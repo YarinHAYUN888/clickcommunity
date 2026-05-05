@@ -230,7 +230,7 @@ export default function AdminEventFormPage() {
   const navigate = useNavigate();
   const { eventId } = useParams();
   const isEdit = !!eventId;
-  const { isSuperUser } = useAdmin();
+  const { isSuperUser, loading: adminLoading } = useAdmin();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEdit);
 
@@ -242,6 +242,7 @@ export default function AdminEventFormPage() {
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
   useEffect(() => {
+    if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
     if (isEdit) {
       supabase.from('events').select('*').eq('id', eventId).single().then(({ data }) => {
@@ -255,7 +256,7 @@ export default function AdminEventFormPage() {
         setLoading(false);
       });
     }
-  }, [isSuperUser, eventId]);
+  }, [adminLoading, isSuperUser, eventId, navigate, isEdit]);
 
   const handleSave = async () => {
     if (!form.name || !form.date || !form.time || !form.location_name) {
@@ -283,7 +284,7 @@ export default function AdminEventFormPage() {
     setSaving(false);
   };
 
-  if (loading) return <SpinnerOverlay />;
+  if (adminLoading || loading) return <SpinnerOverlay />;
 
   const inputCls =
     "w-full h-12 rounded-2xl bg-white/70 backdrop-blur-sm border border-primary/15 px-4 text-sm text-foreground " +
