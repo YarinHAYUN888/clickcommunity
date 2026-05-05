@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useState } from "react";
 
 const testimonials = [
   { image: "/reviews/review-1.png" },
@@ -14,6 +15,23 @@ const testimonials = [
 
 export default function TestimonialsShowcase() {
   const reduceMotion = useReducedMotion();
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  const closeLightbox = useCallback(() => setLightboxSrc(null), []);
+
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeLightbox();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightboxSrc, closeLightbox]);
 
   return (
     <section className="w-full py-24 bg-white">
@@ -62,18 +80,25 @@ export default function TestimonialsShowcase() {
                 bg-gradient-to-b from-[#b388ff]/75 via-[#7C3AED]/45 to-[#4c1d95]/55`}
               >
                 {/* Inner bezel — dark purple stripe like reference */}
-                <div className="relative rounded-[23px] overflow-hidden md:rounded-[25px] border border-black/10 bg-[linear-gradient(180deg,#150826,#2a1248)]">
+                <div className="relative rounded-[23px] overflow-hidden md:rounded-[25px] border border-white/10 bg-[linear-gradient(180deg,#150826,#2a1248)]">
                   {/* Image slot — sits “inside” the card */}
                   <div className="m-2 rounded-[18px] overflow-hidden bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] md:m-3 md:rounded-[20px]">
-                    <div className="aspect-[3/4] md:aspect-[4/5]">
-                      <img
-                        src={item.image}
-                        alt=""
-                        loading="lazy"
-                        className="h-full w-full object-cover select-none pointer-events-none"
-                        draggable={false}
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLightboxSrc(item.image)}
+                      className="block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b388ff] focus-visible:ring-offset-2 focus-visible:ring-offset-white rounded-[inherit]"
+                      aria-label="הגדלת צילום המסך לקריאה"
+                    >
+                      <div className="max-h-[min(68vh,620px)] min-h-[240px] w-full md:max-h-[min(72vh,680px)]">
+                        <img
+                          src={item.image}
+                          alt=""
+                          loading="lazy"
+                          className="max-h-full w-full h-auto object-contain object-top select-none bg-white"
+                          draggable={false}
+                        />
+                      </div>
+                    </button>
                   </div>
 
                   {/* Very subtle sweeping highlight on bezel only */}
@@ -100,6 +125,24 @@ export default function TestimonialsShowcase() {
           ))}
         </div>
       </div>
+
+      {lightboxSrc && (
+        <button
+          type="button"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-3 sm:p-6"
+          onClick={closeLightbox}
+          aria-label="סגירת תצוגה מוגדלת"
+        >
+          <span className="sr-only">לחץ מחוץ לתמונה או Escape לסגירה</span>
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-h-[min(92vh,1400px)] w-auto max-w-[min(96vw,1100px)] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            draggable={false}
+          />
+        </button>
+      )}
     </section>
   );
 }
