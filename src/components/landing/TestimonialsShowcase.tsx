@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 const testimonials = [
   { image: "/reviews/review-1.png" },
@@ -13,6 +13,8 @@ const testimonials = [
 ];
 
 export default function TestimonialsShowcase() {
+  const reduceMotion = useReducedMotion();
+
   return (
     <section className="w-full py-24 bg-white">
       <div className="max-w-6xl mx-auto px-4">
@@ -24,77 +26,74 @@ export default function TestimonialsShowcase() {
         </div>
 
         {/* Carousel on mobile / Grid on desktop */}
-        <div className="flex gap-5 overflow-x-auto snap-x snap-mandatory pb-3 -mx-1 px-1 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible md:snap-none">
+        <div className="flex gap-6 overflow-x-auto snap-x snap-mandatory pb-4 -mx-1 px-1 md:grid md:grid-cols-3 md:gap-8 md:overflow-visible md:snap-none">
           {testimonials.map((item, index) => (
             <motion.div
               key={index}
               initial={{ opacity: 0, y: 40 }}
               whileInView={{ opacity: 1, y: 0 }}
-              animate={{ y: [0, -2 - (index % 3), 0] }}
-              whileHover={{ scale: 1.02, y: -4 }}
+              animate={reduceMotion ? false : { y: [0, -3, 0] }}
+              whileHover={{ scale: reduceMotion ? 1 : 1.015, y: reduceMotion ? 0 : -3 }}
               transition={{
                 opacity: { delay: index * 0.1, duration: 0.5 },
-                y: {
-                  duration: 4.6 + (index % 2) * 0.35,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  delay: index * 0.2,
-                },
+                y: reduceMotion
+                  ? undefined
+                  : {
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: index * 0.18,
+                      duration: 4.75 + (index % 3) * 0.15,
+                      repeatType: "loop",
+                    },
                 scale: { duration: 0.35, ease: "easeOut" },
               }}
               viewport={{ once: true }}
-              className={`group relative rounded-3xl overflow-hidden shrink-0 basis-[86%] snap-center md:basis-auto ${
-                index % 2 === 0 ? "mt-0" : "mt-2 md:mt-5"
-              }`}
+              className="group relative shrink-0 basis-[86%] snap-center md:basis-auto"
             >
-              {/* Glass Card */}
+              {/* Outer halo + neon frame (reference SVG: stroke glow, dark inner bezel) */}
               <div
-                className="
-                  relative
-                  rounded-3xl
-                  border border-black/10
-                  bg-gradient-to-br from-[#7C3AED]/92 via-[#8B5CF6]/88 to-[#A78BFA]/84
-                  backdrop-blur-3xl
-                  shadow-[0_14px_42px_rgba(124,58,237,0.30),0_0_0_1px_rgba(255,255,255,0.20)_inset]
-                  transition-all duration-300
-                  group-hover:shadow-[0_18px_52px_rgba(124,58,237,0.36),0_0_34px_rgba(124,58,237,0.32),0_0_0_1px_rgba(255,255,255,0.26)_inset]
-                "
+                className={`relative rounded-[26px] p-[3px]
+                  shadow-[0_0_36px_rgba(179,136,255,0.42),0_18px_50px_rgba(124,58,237,0.18)]
+                  transition-[box-shadow,transform] duration-300
+                  md:rounded-[28px]
+                  group-hover:shadow-[0_0_44px_rgba(217,70,239,0.52),0_22px_60px_rgba(124,58,237,0.22)] ${
+                    index % 2 === 1 ? "md:translate-y-2.5" : ""
+                  }
+                bg-gradient-to-b from-[#b388ff]/75 via-[#7C3AED]/45 to-[#4c1d95]/55`}
               >
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 rounded-3xl"
-                  style={{
-                    background:
-                      "radial-gradient(80% 60% at 20% 0%, rgba(255,255,255,0.18), transparent 65%), radial-gradient(80% 60% at 100% 100%, rgba(167,139,250,0.18), transparent 70%)",
-                  }}
-                />
-                {/* Soft light sweep */}
-                <motion.div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 z-[1]"
-                  style={{
-                    background:
-                      "linear-gradient(120deg, transparent 40%, rgba(255,255,255,0.08), transparent 60%)",
-                  }}
-                  animate={{ x: ["-120%", "140%"] }}
-                  transition={{
-                    duration: 6.2,
-                    repeat: Infinity,
-                    ease: "linear",
-                    delay: index * 0.35,
-                  }}
-                />
-
-                {/* Image */}
-                <div className="p-3 relative z-[2]">
-                  <div className="rounded-2xl overflow-hidden bg-white/95 aspect-[3/4] md:aspect-[4/5] ring-1 ring-black/5">
-                    <img
-                      src={item.image}
-                      alt="review"
-                      loading="lazy"
-                      className="w-full h-full object-cover"
-                    />
+                {/* Inner bezel — dark purple stripe like reference */}
+                <div className="relative rounded-[23px] overflow-hidden md:rounded-[25px] border border-black/10 bg-[linear-gradient(180deg,#150826,#2a1248)]">
+                  {/* Image slot — sits “inside” the card */}
+                  <div className="m-2 rounded-[18px] overflow-hidden bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] md:m-3 md:rounded-[20px]">
+                    <div className="aspect-[3/4] md:aspect-[4/5]">
+                      <img
+                        src={item.image}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover select-none pointer-events-none"
+                        draggable={false}
+                      />
+                    </div>
                   </div>
+
+                  {/* Very subtle sweeping highlight on bezel only */}
+                  {!reduceMotion && (
+                    <motion.div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 mix-blend-soft-light opacity-55"
+                      style={{
+                        background:
+                          "linear-gradient(120deg, transparent 42%, rgba(255,255,255,0.09), transparent 58%)",
+                      }}
+                      animate={{ x: ["-115%", "130%"] }}
+                      transition={{
+                        duration: 6.5,
+                        repeat: Infinity,
+                        ease: "linear",
+                        delay: index * 0.4,
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </motion.div>
