@@ -7,6 +7,7 @@ export interface ClickFeedItem {
   profile: SupabaseProfile;
   compatibilityScore: number;
   sharedInterests: string[];
+  isProfilePartial: boolean;
 }
 
 function calculateCompatibility(myInterests: string[], theirInterests: string[]): { score: number; shared: string[] } {
@@ -32,10 +33,9 @@ export function useClicksFeed(currentUserId: string, myInterests: string[]) {
 
     // RLS (Profiles select isolation) כבר מגביל active/shadow וכו׳ — לא מוסיפים סינון כפול כאן.
     const { data, error } = await supabase
-  .from('profiles')
-  .select('user_id, first_name, status, role');
-
-console.log(data);
+      .from('profiles')
+      .select('*')
+      .neq('user_id', currentUserId);
 
     if (error) {
       console.error('useClicksFeed:', error.message);
@@ -52,11 +52,18 @@ console.log(data);
 
     const interests = interestsRef.current;
 
+    const hasNonEmpty = (value: string | null | undefined) => !!value?.trim();
     const hasDisplayPhoto = (p: SupabaseProfile) =>
       (Array.isArray(p.photos) && p.photos.length > 0) || !!(p.avatar_url && String(p.avatar_url).trim());
+    const isProfilePartial = (p: SupabaseProfile) => {
+      const hasName = hasNonEmpty(p.first_name);
+      const hasBio = hasNonEmpty(p.bio);
+      const hasOccupation = hasNonEmpty(p.occupation);
+      const hasInterests = Array.isArray(p.interests) && p.interests.length > 0;
+      return !(hasName && hasDisplayPhoto(p) && (hasBio || hasOccupation || hasInterests));
+    };
 
     const nonGuest = (data as SupabaseProfile[]).filter((p) => p.role !== 'guest');
-
     let profiles = nonGuest.filter((p) => p.first_name && hasDisplayPhoto(p));
 
     /** אם אחרי סינון קשיח אין אף פרופיל אבל יש משתמשים בשרת — נציג פיד רך (שם בלבד) כדי לא להשאיר פיד ריק בטעות תצוגה */
@@ -67,7 +74,12 @@ console.log(data);
     const feedItems: ClickFeedItem[] = profiles
       .map((profile) => {
         const { score, shared } = calculateCompatibility(interests, profile.interests || []);
-        return { profile, compatibilityScore: score, sharedInterests: shared };
+        return {
+          profile,
+          compatibilityScore: score,
+          sharedInterests: shared,
+          isProfilePartial: isProfilePartial(profile),
+        };
       })
       .sort((a, b) => b.compatibilityScore - a.compatibilityScore);
 

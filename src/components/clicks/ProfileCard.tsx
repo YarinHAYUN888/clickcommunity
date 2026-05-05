@@ -17,6 +17,7 @@ interface ProfileCardProps {
   profile: SupabaseProfile;
   compatibilityScore: number;
   sharedInterests: string[];
+  isProfilePartial: boolean;
   index: number;
   isMember: boolean;
   showEventBanner?: string;
@@ -30,6 +31,7 @@ export default function ProfileCard({
   profile,
   compatibilityScore,
   sharedInterests,
+  isProfilePartial,
   index,
   isMember,
   showEventBanner,
@@ -88,6 +90,14 @@ export default function ProfileCard({
 
         {/* Photo section */}
         <div className="relative overflow-hidden cursor-pointer" style={{ height: 320 }} onClick={onViewProfile}>
+          {isProfilePartial && (
+            <div
+              className="absolute top-3 start-3 z-20 rounded-full bg-background/90 text-foreground px-2.5 py-1 text-[11px] font-semibold border border-border"
+              title="חלק מהפרטים עדיין לא הושלמו"
+            >
+              פרופיל חלקי
+            </div>
+          )}
           {hasUnreadDm && (
             <div
               className="absolute top-3 end-3 z-20 flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-2.5 py-1 shadow-lg border border-background"

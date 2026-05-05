@@ -142,6 +142,19 @@ export default function FullProfileModal({
                     <p className="text-base text-foreground leading-relaxed">{profile.bio}</p>
                   </div>
                 )}
+                {!profile.bio && (
+                  <div>
+                    <h4 className="text-base font-semibold text-muted-foreground mb-2">קצת עליי</h4>
+                    <p className="text-sm text-muted-foreground">עדיין לא נוספה ביוגרפיה לפרופיל הזה.</p>
+                  </div>
+                )}
+
+                {profile.occupation && (
+                  <div>
+                    <h4 className="text-base font-semibold text-muted-foreground mb-2">עיסוק</h4>
+                    <p className="text-base text-foreground leading-relaxed">{profile.occupation}</p>
+                  </div>
+                )}
 
                 {(profile.interests?.length ?? 0) > 0 && (
                   <div>
@@ -151,6 +164,12 @@ export default function FullProfileModal({
                         <InterestPill key={interest} label={interest} emoji={getInterestEmoji(interest)} shared={sharedInterests.includes(interest)} size="md" />
                       ))}
                     </div>
+                  </div>
+                )}
+                {(profile.interests?.length ?? 0) === 0 && (
+                  <div>
+                    <h4 className="text-base font-semibold text-muted-foreground mb-2">תחומי עניין</h4>
+                    <p className="text-sm text-muted-foreground">עדיין לא נוספו תחומי עניין.</p>
                   </div>
                 )}
 

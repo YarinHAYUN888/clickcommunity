@@ -37,6 +37,29 @@ export interface ChatLocationState {
   partnerPreview?: ChatLocationPartnerPreview;
 }
 
+type PartnerNameSource = {
+  first_name?: string | null;
+  last_name?: string | null;
+  username?: string | null;
+};
+
+/** Resolve stable display name for chat partner with safe fallbacks. */
+export function resolvePartnerDisplayName(
+  partner: PartnerNameSource | null | undefined,
+  fallbackName?: string | null
+) {
+  const first = partner?.first_name?.trim() || '';
+  const last = partner?.last_name?.trim() || '';
+  const username = partner?.username?.trim() || '';
+  const fallback = fallbackName?.trim() || '';
+
+  if (first && last) return `${first} ${last}`;
+  if (first) return first;
+  if (username) return username;
+  if (fallback) return fallback;
+  return 'משתמש/ת';
+}
+
 export function partnerPreviewFromProfile(p: {
   first_name?: string | null;
   photos?: string[] | null;

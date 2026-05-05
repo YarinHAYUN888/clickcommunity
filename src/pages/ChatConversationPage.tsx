@@ -10,6 +10,7 @@ import {
   sendMessage,
   markAsRead,
   createOrGetDm,
+  resolvePartnerDisplayName,
   MessageRow,
   type ChatLocationState,
 } from '@/services/chat';
@@ -141,7 +142,7 @@ export default function ChatConversationPage() {
         if (!chatData || chatData.type === 'direct') {
           const partner = await getDmPartner(chatId, authId);
           if (partner) {
-            setPartnerName((prev) => partner.first_name?.trim() || prev || 'משתמש/ת');
+            setPartnerName((prev) => resolvePartnerDisplayName(partner, prev));
             setPartnerAvatar((prev) => partner.photos?.[0] || partner.avatar_url || prev);
           }
         }

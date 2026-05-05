@@ -186,6 +186,7 @@ export default function ClicksPage() {
                   profile={item.profile}
                   compatibilityScore={item.compatibilityScore}
                   sharedInterests={item.sharedInterests}
+                  isProfilePartial={item.isProfilePartial}
                   index={i}
                   isMember={isMember}
                   hasUnreadDm={!!unreadFromUser[item.profile.user_id]}

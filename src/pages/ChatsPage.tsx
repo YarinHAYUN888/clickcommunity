@@ -10,6 +10,7 @@ import {
   getLastMessage,
   getUnreadCount,
   getEventForChat,
+  resolvePartnerDisplayName,
   ChatRow,
   MessageRow,
 } from '@/services/chat';
@@ -70,7 +71,7 @@ export default function ChatsPage() {
             ]);
             return {
               chat,
-              partnerName: partner?.first_name || 'משתמש/ת',
+              partnerName: resolvePartnerDisplayName(partner),
               partnerAvatar: partner?.photos?.[0] || partner?.avatar_url || null,
               lastMsg,
               unread,
