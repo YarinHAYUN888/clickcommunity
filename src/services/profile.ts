@@ -1,7 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 
 export async function getMyProfile(userId: string) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
     .select('*')
     .eq('user_id', userId)
@@ -9,6 +9,19 @@ export async function getMyProfile(userId: string) {
   if (error) {
     console.error('getMyProfile:', error.message, error);
     throw error;
+  }
+  if (!data) {
+    const { error: upsertErr } = await supabase
+      .from('profiles')
+      .upsert({ user_id: userId }, { onConflict: 'user_id' });
+    if (!upsertErr) {
+      const again = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!again.error) data = again.data;
+    }
   }
   return data;
 }

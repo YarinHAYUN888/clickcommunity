@@ -42,16 +42,47 @@ export function useCurrentUser(): CurrentUser {
   useEffect(() => {
     mountedRef.current = true;
 
-    const fetchProfile = (userId: string) => {
+    const fetchProfile = (userId: string, userMeta?: { first_name?: unknown; last_name?: unknown }) => {
       if (mountedRef.current) setLoading(true);
       supabase
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle()
-        .then(({ data, error }) => {
+        .then(async ({ data, error }) => {
           if (error) console.error('useCurrentUser fetchProfile:', error.message);
-          if (mountedRef.current) setProfile((data as SupabaseProfile | null) ?? null);
+          let profileData = (data as SupabaseProfile | null) ?? null;
+          if (!profileData) {
+            const firstName =
+              typeof userMeta?.first_name === 'string' ? userMeta.first_name.trim() : '';
+            const lastName =
+              typeof userMeta?.last_name === 'string' ? userMeta.last_name.trim() : '';
+
+            // Self-heal: create missing profile row for authenticated user.
+            const { error: upsertErr } = await supabase
+              .from('profiles')
+              .upsert(
+                {
+                  user_id: userId,
+                  first_name: firstName || null,
+                  last_name: lastName || null,
+                },
+                { onConflict: 'user_id' }
+              );
+            if (upsertErr) {
+              console.error('useCurrentUser profile self-heal failed:', upsertErr.message);
+            } else {
+              const { data: refetched, error: refetchErr } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .maybeSingle();
+              if (refetchErr) console.error('useCurrentUser refetch after self-heal failed:', refetchErr.message);
+              profileData = (refetched as SupabaseProfile | null) ?? null;
+            }
+          }
+
+          if (mountedRef.current) setProfile(profileData);
           if (mountedRef.current) setLoading(false);
         })
         .catch((e) => {
@@ -65,7 +96,7 @@ export function useCurrentUser(): CurrentUser {
       if (session?.user) {
         if (mountedRef.current) setProfile(null);
         setAuthId(session.user.id);
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user.user_metadata ?? undefined);
       } else {
         setAuthId(null);
         setProfile(null);
@@ -80,7 +111,7 @@ export function useCurrentUser(): CurrentUser {
         return;
       }
       setAuthId(session.user.id);
-      fetchProfile(session.user.id);
+      fetchProfile(session.user.id, session.user.user_metadata ?? undefined);
     });
 
     return () => {
