@@ -241,6 +241,11 @@ export default function AdminEventFormPage() {
   });
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
+  const toOptional = (value: string) => {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
   useEffect(() => {
     if (adminLoading) return;
     if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
@@ -259,7 +264,11 @@ export default function AdminEventFormPage() {
   }, [adminLoading, isSuperUser, eventId, navigate, isEdit]);
 
   const handleSave = async () => {
-    if (!form.name || !form.date || !form.time || !form.location_name) {
+    const name = form.name.trim();
+    const date = form.date.trim();
+    const time = form.time.trim();
+    const locationName = form.location_name.trim();
+    if (!name || !date || !time || !locationName) {
       toast.error('יש למלא את כל השדות הנדרשים');
       return;
     }
@@ -270,7 +279,28 @@ export default function AdminEventFormPage() {
       if (coverFile) {
         cover_image_url = await uploadEventCover(tempId, coverFile);
       }
-      const eventData = { ...form, cover_image_url, gender_balance_target: form.gender_balance_target };
+
+      const maxCapacity = Number.isFinite(form.max_capacity) ? Math.max(5, Math.round(form.max_capacity)) : 40;
+      const reservedNewSpots = Number.isFinite(form.reserved_new_spots)
+        ? Math.min(Math.max(0, Math.round(form.reserved_new_spots)), maxCapacity)
+        : 0;
+      const genderBalanceTarget = Number.isFinite(form.gender_balance_target)
+        ? Math.min(1, Math.max(0, form.gender_balance_target))
+        : 0.5;
+
+      const eventData = {
+        name,
+        date,
+        time,
+        location_name: locationName,
+        location_address: toOptional(form.location_address),
+        location_url: toOptional(form.location_url),
+        description: toOptional(form.description),
+        max_capacity: maxCapacity,
+        reserved_new_spots: reservedNewSpots,
+        gender_balance_target: genderBalanceTarget,
+        cover_image_url: toOptional(cover_image_url),
+      };
       if (isEdit) {
         await performAdminAction('update_event', 'event', eventId, eventData);
         toast.success('האירוע עודכן!');
@@ -280,7 +310,15 @@ export default function AdminEventFormPage() {
         toast.success('האירוע פורסם!');
         navigate(`/admin/events/${result.event?.id || ''}`);
       }
-    } catch { toast.error('שגיאה בשמירה'); }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err && 'message' in err
+            ? String((err as { message?: unknown }).message)
+            : 'שגיאה בשמירה';
+      toast.error(message || 'שגיאה בשמירה');
+    }
     setSaving(false);
   };
 

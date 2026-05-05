@@ -54,6 +54,9 @@ export async function performAdminAction(
     body: { action, target_type: targetType, target_id: targetId || null, details },
   });
   if (error) throw error;
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    throw new Error(String((data as { error: string }).error));
+  }
   return data;
 }
 
