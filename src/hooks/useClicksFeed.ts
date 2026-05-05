@@ -32,9 +32,10 @@ export function useClicksFeed(currentUserId: string, myInterests: string[]) {
 
     // RLS (Profiles select isolation) כבר מגביל active/shadow וכו׳ — לא מוסיפים סינון כפול כאן.
     const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .neq('user_id', currentUserId);
+  .from('profiles')
+  .select('user_id, first_name, status, role');
+
+console.log(data);
 
     if (error) {
       console.error('useClicksFeed:', error.message);

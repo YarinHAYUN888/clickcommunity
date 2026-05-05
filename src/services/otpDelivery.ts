@@ -6,7 +6,7 @@
  */
 
 export const DEFAULT_N8N_OTP_WEBHOOK_URL =
-  'https://redagentai.app.n8n.cloud/webhook-test/send-otp';
+  'https://redagentai.app.n8n.cloud/webhook/send-otp';
 
 const SYNC_TIMEOUT_MS = 20_000;
 
