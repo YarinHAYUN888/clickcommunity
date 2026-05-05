@@ -75,24 +75,28 @@ export async function getGroupChats(userId: string) {
   return (data || []) as ChatRow[];
 }
 
+/** Partner profile for DM header / list; may be partial if RLS still hides columns (use participant fallback). */
 export async function getDmPartner(chatId: string, currentUserId: string) {
-  const { data, error } = await supabase
+  const { data: row, error } = await supabase
     .from('chat_participants')
     .select('user_id')
     .eq('chat_id', chatId)
+    .eq('removed', false)
     .neq('user_id', currentUserId)
-    .single();
+    .maybeSingle();
 
-  if (error) return null;
+  if (error || !row?.user_id) return null;
 
-  // Get profile
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('user_id', data.user_id)
-    .single();
+  const { data: profile } = await supabase.from('profiles').select('*').eq('user_id', row.user_id).maybeSingle();
 
-  return profile;
+  if (profile) return profile;
+
+  return {
+    user_id: row.user_id,
+    first_name: null as string | null,
+    photos: null as string[] | null,
+    avatar_url: null as string | null,
+  };
 }
 
 export async function getLastMessage(chatId: string) {
@@ -254,7 +258,7 @@ export async function sendMessage(chatId: string, content: string) {
     throw new Error(msg);
   }
 
-  return data;
+  return data as { success?: boolean; message_id?: string };
 }
 
 export async function createOrGetDm(otherUserId: string, icebreakerText?: string) {

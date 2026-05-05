@@ -14,6 +14,7 @@ import {
 } from '@/services/chat';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
 
 function formatMsgTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
@@ -114,16 +115,20 @@ export default function ChatConversationPage() {
           }
         }
 
-        const partner = await getDmPartner(chatId, authId);
-        if (partner) {
-          setPartnerName(partner.first_name || 'משתמש/ת');
-          setPartnerAvatar(partner.photos?.[0] || partner.avatar_url || null);
+        if (!chatData || chatData.type === 'direct') {
+          const partner = await getDmPartner(chatId, authId);
+          if (partner) {
+            setPartnerName(partner.first_name || 'משתמש/ת');
+            setPartnerAvatar(partner.photos?.[0] || partner.avatar_url || null);
+          }
         }
 
         const msgs = await getChatMessages(chatId);
         setMessages(msgs);
 
-        markAsRead(chatId).catch(() => {});
+        markAsRead(chatId)
+          .then(() => notifyChatUnreadRefresh())
+          .catch(() => {});
 
         channel = subscribeToMessages(chatId, (newMsg) => {
           setMessages((prev) => {
@@ -132,7 +137,9 @@ export default function ChatConversationPage() {
             }
             return [...prev, newMsg];
           });
-          markAsRead(chatId).catch(() => {});
+          markAsRead(chatId)
+            .then(() => notifyChatUnreadRefresh())
+            .catch(() => {});
         });
       } catch (err) {
         console.error('Chat init error:', err);
@@ -163,7 +170,27 @@ export default function ChatConversationPage() {
     setInput('');
     setSending(true);
     try {
-      await sendMessage(chatId, text);
+      const res = await sendMessage(chatId, text);
+      if (res?.message_id && authId) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === res.message_id)) return prev;
+          return [
+            ...prev,
+            {
+              id: res.message_id,
+              chat_id: chatId,
+              sender_id: authId,
+              content: text,
+              is_system: false,
+              is_pinned: false,
+              is_deleted: false,
+              deleted_by: null,
+              read_by: [authId],
+              created_at: new Date().toISOString(),
+            },
+          ];
+        });
+      }
     } catch (err) {
       console.error('Send error:', err);
       const msg =

@@ -2,7 +2,6 @@ import { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Sparkles, Zap } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
-import BottomTabBar from '@/components/clicks/BottomTabBar';
 import ProfileCard from '@/components/clicks/ProfileCard';
 import ClicksFeedSkeleton from '@/components/clicks/ClicksFeedSkeleton';
 import IcebreakerSheet from '@/components/clicks/IcebreakerSheet';
@@ -180,8 +179,6 @@ export default function ClicksPage() {
           isMember={isMember}
         />
       )}
-
-      <BottomTabBar />
     </div>
   );
 }

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, Users, Lock, Calendar } from 'lucide-react';
-import BottomTabBar from '@/components/clicks/BottomTabBar';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   getDirectChats,
@@ -63,24 +62,23 @@ export default function ChatsPage() {
     try {
       if (tab === 'direct') {
         const chats = await getDirectChats(authId);
-        const rows: (DmRowData | null)[] = await Promise.all(
+        const rows: DmRowData[] = await Promise.all(
           chats.map(async (chat) => {
             const partner = await getDmPartner(chat.id, authId);
-            if (!partner) return null;
             const [lastMsg, unread] = await Promise.all([
               getLastMessage(chat.id),
               getUnreadCount(chat.id, authId),
             ]);
             return {
               chat,
-              partnerName: partner.first_name || 'משתמש/ת',
-              partnerAvatar: partner.photos?.[0] || partner.avatar_url || null,
+              partnerName: partner?.first_name || 'משתמש/ת',
+              partnerAvatar: partner?.photos?.[0] || partner?.avatar_url || null,
               lastMsg,
               unread,
             };
           })
         );
-        setDms(rows.filter((r): r is DmRowData => r !== null));
+        setDms(rows);
       } else {
         const chats = await getGroupChats(authId);
         const rows: GroupRowData[] = await Promise.all(
@@ -128,7 +126,6 @@ export default function ChatsPage() {
             למידע על מנוי
           </button>
         </div>
-        <BottomTabBar />
       </div>
     );
   }
@@ -312,8 +309,6 @@ export default function ChatsPage() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <BottomTabBar />
     </div>
   );
 }

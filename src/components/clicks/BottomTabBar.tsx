@@ -3,6 +3,7 @@ import { Heart, Calendar, MessageCircle, User, Crown, Shield } from 'lucide-reac
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { useAdmin } from '@/contexts/AdminContext';
+import { useChatUnreadCount } from '@/contexts/ChatUnreadContext';
 import { springs } from '@/lib/motion';
 
 const baseTabs = [
@@ -17,6 +18,7 @@ export default function BottomTabBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isSuperUser } = useAdmin();
+  const chatUnread = useChatUnreadCount();
 
   const tabs = isSuperUser
     ? [...baseTabs, { icon: Shield, label: 'ניהול' as const, path: '/admin' as const }]
@@ -36,6 +38,7 @@ export default function BottomTabBar() {
       <div className="flex items-center justify-around h-16 w-full max-w-[1200px] mx-auto px-2 sm:px-6">
         {tabs.map(({ icon: Icon, label, path }) => {
           const isActive = location.pathname.startsWith(path);
+          const showChatBadge = path === '/chats' && chatUnread > 0;
 
           return (
             <motion.button
@@ -66,6 +69,14 @@ export default function BottomTabBar() {
                   fill={isActive ? 'url(#tab-icon-gradient)' : 'none'}
                   strokeWidth={isActive ? 1.5 : 1.8}
                 />
+                {showChatBadge && (
+                  <span
+                    className="absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground flex items-center justify-center shadow-sm border border-background"
+                    aria-label={`הודעות שלא נקראו: ${chatUnread}`}
+                  >
+                    {chatUnread > 99 ? '99+' : chatUnread}
+                  </span>
+                )}
               </div>
               <span className={cn('relative text-[10px]', isActive ? 'font-bold' : 'font-normal')}>{label}</span>
             </motion.button>
