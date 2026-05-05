@@ -54,9 +54,14 @@ export function useClicksFeed(currentUserId: string, myInterests: string[]) {
     const hasDisplayPhoto = (p: SupabaseProfile) =>
       (Array.isArray(p.photos) && p.photos.length > 0) || !!(p.avatar_url && String(p.avatar_url).trim());
 
-    const profiles = (data as SupabaseProfile[])
-      .filter((p) => p.first_name && hasDisplayPhoto(p))
-      .filter((p) => p.role !== 'guest');
+    const nonGuest = (data as SupabaseProfile[]).filter((p) => p.role !== 'guest');
+
+    let profiles = nonGuest.filter((p) => p.first_name && hasDisplayPhoto(p));
+
+    /** אם אחרי סינון קשיח אין אף פרופיל אבל יש משתמשים בשרת — נציג פיד רך (שם בלבד) כדי לא להשאיר פיד ריק בטעות תצוגה */
+    if (profiles.length === 0 && nonGuest.some((p) => p.first_name)) {
+      profiles = nonGuest.filter((p) => !!p.first_name?.trim());
+    }
 
     const feedItems: ClickFeedItem[] = profiles
       .map((profile) => {

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { useAdmin } from '@/contexts/AdminContext';
 import { useChatUnreadCount } from '@/contexts/ChatUnreadContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { springs } from '@/lib/motion';
 
 const baseTabs = [
@@ -18,9 +19,13 @@ export default function BottomTabBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isSuperUser } = useAdmin();
+  const { profile } = useCurrentUser();
   const chatUnread = useChatUnreadCount();
 
-  const tabs = isSuperUser
+  /** גם super_role מהפרופיל — למקרה שיש פער טעינה בין AdminContext לפרופיל */
+  const showAdminTab = isSuperUser || !!profile?.super_role?.trim();
+
+  const tabs = showAdminTab
     ? [...baseTabs, { icon: Shield, label: 'ניהול' as const, path: '/admin' as const }]
     : [...baseTabs];
 

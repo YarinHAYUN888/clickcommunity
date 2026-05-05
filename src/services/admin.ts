@@ -5,9 +5,9 @@ export async function checkSuperUser(userId: string): Promise<string | null> {
     .from('profiles')
     .select('super_role')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
   if (error) return null;
-  return (data as any)?.super_role || null;
+  return (data as { super_role?: string | null } | null)?.super_role || null;
 }
 
 export async function getAdminStats() {
