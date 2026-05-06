@@ -90,7 +90,18 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
     profileData.questionnaire_responses = data.questionnaireResponses as ProfilesInsert['questionnaire_responses'];
   }
 
-  const { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
+  let { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
+  if (error) {
+    // Backward-compatible fallback when newest columns are not deployed yet in target DB.
+    const fallbackData: ProfilesInsert = {
+      ...profileData,
+      updated_at: new Date().toISOString(),
+    };
+    delete (fallbackData as Record<string, unknown>).profile_completed;
+    delete (fallbackData as Record<string, unknown>).image_upload_status;
+    const fallback = await supabase.from('profiles').upsert(fallbackData, { onConflict: 'user_id' });
+    error = fallback.error;
+  }
   if (error) {
     console.error('Profile upsert error:', error);
     throw new Error('profile_save_failed');
@@ -871,7 +882,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const completeRegistration = useCallback(async (): Promise<void> => {
+  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean }> => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
 
@@ -912,6 +923,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     }
 
     const uid = verifyData.user.id;
+    let profileSyncFailed = false;
     try {
       console.info('[onboarding] photo upload start', { userId: uid, photoCount: data.photos?.length || 0 });
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
@@ -947,7 +959,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
           ai_summary: 'Profile sync failed after auth creation',
         })
         .eq('user_id', uid);
-      throw new Error('profile_save_failed');
+      profileSyncFailed = true;
     }
 
     const refRaw =
@@ -963,6 +975,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     } catch (e) {
       console.warn('claim-signup-rewards:', e);
     }
+    return { profileSyncFailed };
   }, [data]);
 
   const handleSendCode = useCallback(async () => {
@@ -1042,7 +1055,10 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         return;
       }
 
-      await completeRegistration();
+      const result = await completeRegistration();
+      if (result.profileSyncFailed) {
+        toast.warning('החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.');
+      }
       onComplete();
     } catch (e) {
       console.error('Verify exception:', e);
