@@ -4,6 +4,10 @@ project_id = "lwprevqahebqenpzdvle"
 [functions.registration-webhook]
 verify_jwt = false
 
+# OTP webhook invoke also happens pre-auth from onboarding
+[functions.send-otp-webhook]
+verify_jwt = false
+
 # Onboarding user is not signed in yet; function uses service role internally
 [functions.complete-registration]
 verify_jwt = false

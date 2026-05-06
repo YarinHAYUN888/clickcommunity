@@ -152,10 +152,10 @@ Deno.serve(async (req) => {
         const { error: deleteVotesErr } = await supabaseAdmin.from("event_votes").delete().eq("event_id", target_id);
         assertNoDbError(deleteVotesErr, "Failed to delete event votes");
         const { error: deletePhotosErr } = await supabaseAdmin.from("event_photos").delete().eq("event_id", target_id);
-        assertNoDbError(deletePhotosErr, "Failed to delete event photos");
-        const { error: deleteRegsErr } = await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
+        assertNoDbError(deletePhotosErr, "Failed to delete event photos");        const { error: deleteRegsErr } = await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
         assertNoDbError(deleteRegsErr, "Failed to delete event registrations");
         const { error: deleteEventErr } = await supabaseAdmin.from("events").delete().eq("id", target_id);
+        console.log("deleteEventErr", deleteEventErr);
         assertNoDbError(deleteEventErr, "Failed to delete event");
 
         const { data: remainingEvent, error: verifyErr } = await supabaseAdmin

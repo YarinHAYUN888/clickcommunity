@@ -42,8 +42,7 @@ Deno.serve(async (req) => {
       .from("event_registrations")
       .select("user_id, status")
       .eq("event_id", event_id)
-      .in("status", ["registered", "approved"]);
-
+      .in("status", ["registered"]);
     const total = registrations?.length || 0;
 
     // Get gender breakdown from profiles

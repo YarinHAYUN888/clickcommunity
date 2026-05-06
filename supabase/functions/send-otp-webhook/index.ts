@@ -4,8 +4,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const WEBHOOK_URL = "  'https://redagentai.app.n8n.cloud/webhook/send-otp';
-";
+const WEBHOOK_URL = "https://redagentai.app.n8n.cloud/webhook/send-otp";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
