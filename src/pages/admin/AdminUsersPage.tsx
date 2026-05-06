@@ -220,6 +220,18 @@ export default function AdminUsersPage() {
                   <div className="text-muted-foreground col-span-2">נקודות: <span className="text-foreground font-medium">{selectedUser.points ?? 0}</span></div>
                 </div>
 
+                {/* Management */}
+                <div className="space-y-2 pt-1">
+                  <h4 className="text-sm font-semibold text-muted-foreground">ניהול</h4>
+                  <button
+                    onClick={() => setConfirmAction({ action: 'remove_user', label: 'הסרת משתמש' })}
+                    disabled={actionLoading}
+                    className="w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-medium"
+                  >
+                    הסרת משתמש
+                  </button>
+                </div>
+
                 {ledger.length > 0 && (
                   <div className="rounded-xl bg-muted/30 border border-border/40 p-3">
                     <p className="text-[11px] font-semibold text-muted-foreground mb-2">לוח נקודות (אחרונות)</p>
@@ -347,14 +359,6 @@ export default function AdminUsersPage() {
                     {selectedUser.suspended ? 'בטל השעיה' : 'השעה משתמש'}
                   </button>
 
-                  {/* Remove user */}
-                  <button
-                    onClick={() => setConfirmAction({ action: 'remove_user', label: 'הסרת משתמש' })}
-                    disabled={actionLoading}
-                    className="w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-medium"
-                  >
-                    הסרת משתמש
-                  </button>
                 </div>
               </GlassCard>
             </motion.div>
