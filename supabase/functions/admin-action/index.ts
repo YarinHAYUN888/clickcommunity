@@ -90,10 +90,32 @@ Deno.serve(async (req) => {
         }).eq("user_id", target_id);
         return respond({});
       }
+      case "remove_user":
       case "delete_user": {
-        await supabaseAdmin.from("profiles").update({ suspended: true, suspended_at: new Date().toISOString(), suspended_by: user.id }).eq("user_id", target_id);
-        await supabaseAdmin.from("chat_participants").update({ removed: true, removed_by: user.id, removed_at: new Date().toISOString() }).eq("user_id", target_id);
-        await supabaseAdmin.from("subscriptions").update({ status: "cancelled", cancel_at_period_end: true }).eq("user_id", target_id);
+        if (!target_id) return respondErr("target_id required");
+        if (target_id === user.id) return respondErr("cannot remove current admin user", 400);
+
+        // Best-effort cleanup of user-linked rows before Auth deletion.
+        const { error: regsErr } = await supabaseAdmin.from("event_registrations").delete().eq("user_id", target_id);
+        assertNoDbError(regsErr, "Failed to delete event registrations");
+        const { error: votesAsVoterErr } = await supabaseAdmin.from("event_votes").delete().eq("voter_id", target_id);
+        assertNoDbError(votesAsVoterErr, "Failed to delete user votes");
+        const { error: votesAsVoteeErr } = await supabaseAdmin.from("event_votes").delete().eq("votee_id", target_id);
+        assertNoDbError(votesAsVoteeErr, "Failed to delete votes for user");
+        const { error: pointsErr } = await supabaseAdmin.from("points_history").delete().eq("user_id", target_id);
+        assertNoDbError(pointsErr, "Failed to delete points history");
+        const { error: subsErr } = await supabaseAdmin.from("subscriptions").delete().eq("user_id", target_id);
+        assertNoDbError(subsErr, "Failed to delete subscriptions");
+        const { error: referralsByErr } = await supabaseAdmin.from("referrals").delete().eq("referrer_id", target_id);
+        assertNoDbError(referralsByErr, "Failed to delete referrals by user");
+        const { error: referralsToErr } = await supabaseAdmin.from("referrals").delete().eq("referred_user_id", target_id);
+        assertNoDbError(referralsToErr, "Failed to delete referrals to user");
+        const { error: participantsErr } = await supabaseAdmin.from("chat_participants").delete().eq("user_id", target_id);
+        assertNoDbError(participantsErr, "Failed to delete chat participants");
+
+        const { error: deleteAuthErr } = await supabaseAdmin.auth.admin.deleteUser(target_id);
+        if (deleteAuthErr) return respondErr(deleteAuthErr.message || "Failed to remove auth user", 500);
+
         return respond({});
       }
       case "grant_free_subscription": {

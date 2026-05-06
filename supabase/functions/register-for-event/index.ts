@@ -22,9 +22,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get user from JWT
-    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!);
-    const { data: { user }, error: userError } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
+    // Get user from JWT (service client can validate the access token directly)
+    const jwt = authHeader.replace("Bearer ", "").trim();
+    const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -66,9 +66,18 @@ Deno.serve(async (req) => {
     }
 
     // Check existing registration
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("event_registrations")
-      .select("*").eq("event_id", event_id).eq("user_id", user.id).single();
+      .select("id, status, waitlist_position")
+      .eq("event_id", event_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (existingError) {
+      console.error("Failed to check existing registration", existingError);
+      return new Response(JSON.stringify({ error: "Failed to check existing registration" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (existing) {
       return new Response(JSON.stringify({ error: "Already registered", status: existing.status, waitlist_position: existing.waitlist_position }), {
         status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -105,15 +114,35 @@ Deno.serve(async (req) => {
     let entryCode: string | null = null;
     for (let i = 0; i < 5; i++) {
       entryCode = generateUniqueCode();
-      const { error } = await supabase
+      const insertPayload: Record<string, unknown> = {
+        event_id,
+        user_id: user.id,
+        status: regStatus,
+        waitlist_position: waitlistPosition,
+        entry_code: entryCode,
+      };
+
+      let { error } = await supabase
         .from("event_registrations")
-        .insert({
+        .insert(insertPayload);
+
+      // Backward compatibility when DB migration for entry_code is not applied yet.
+      if (error?.message?.toLowerCase().includes("entry_code")) {
+        const fallbackPayload = {
           event_id,
           user_id: user.id,
           status: regStatus,
           waitlist_position: waitlistPosition,
-          entry_code: entryCode,
-        });
+        };
+        const fallbackResult = await supabase
+          .from("event_registrations")
+          .insert(fallbackPayload);
+        error = fallbackResult.error;
+        if (!error) {
+          entryCode = null;
+        }
+      }
+
       if (!error) {
         insertError = null;
         break;

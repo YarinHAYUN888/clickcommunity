@@ -347,13 +347,13 @@ export default function AdminUsersPage() {
                     {selectedUser.suspended ? 'בטל השעיה' : 'השעה משתמש'}
                   </button>
 
-                  {/* Delete */}
+                  {/* Remove user */}
                   <button
-                    onClick={() => setConfirmAction({ action: 'delete_user', label: 'מחק משתמש' })}
+                    onClick={() => setConfirmAction({ action: 'remove_user', label: 'הסרת משתמש' })}
                     disabled={actionLoading}
                     className="w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-medium"
                   >
-                    מחק משתמש
+                    הסרת משתמש
                   </button>
                 </div>
               </GlassCard>
@@ -381,7 +381,7 @@ export default function AdminUsersPage() {
               <GlassCard variant="strong" className="p-6 space-y-4 text-center">
                 <h3 className="text-lg font-bold text-foreground">בטוח/ה?</h3>
                 <p className="text-sm text-muted-foreground">
-                  {confirmAction.action === 'delete_user' ? 'פעולה זו בלתי הפיכה!' : `פעולה: ${confirmAction.label}`}
+                  {confirmAction.action === 'remove_user' ? 'פעולה זו תמחק את המשתמש לצמיתות מהמערכת (כולל Auth).' : `פעולה: ${confirmAction.label}`}
                 </p>
                 <button
                   onClick={() => doAction(confirmAction.action, selectedUser.user_id)}

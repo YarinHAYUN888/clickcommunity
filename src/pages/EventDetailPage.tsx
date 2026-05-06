@@ -153,6 +153,10 @@ export default function EventDetailPage() {
     registration?.status === 'approved' ||
     registration?.status === 'checked_in';
   const canRegister = role === 'member';
+  const qrValue =
+    registration?.entry_code && event
+      ? `${window.location.origin}/events/${event.id}?ticket=${encodeURIComponent(registration.entry_code)}`
+      : '';
 
   const formatDate = (d: string) => {
     const date = new Date(d);
@@ -358,7 +362,7 @@ export default function EventDetailPage() {
             <h3 className="text-base font-semibold text-foreground">כרטיס כניסה לאירוע</h3>
             <div className="flex justify-center">
               <div className="bg-white p-3 rounded-2xl">
-                <QRCodeSVG value={registration.entry_code} size={168} />
+                <QRCodeSVG value={qrValue || `CLICKS_TICKET:${registration.entry_code}`} size={168} />
               </div>
             </div>
             <p className="text-sm text-muted-foreground">קוד כניסה: <span className="font-semibold text-foreground">{registration.entry_code}</span></p>
