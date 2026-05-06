@@ -62,6 +62,11 @@ Deno.serve(async (req) => {
 
     const respondErr = (msg: string, status = 400) =>
       new Response(JSON.stringify({ success: false, error: msg }), { status, headers: corsHeaders });
+    const assertNoDbError = (error: { message?: string } | null, fallback: string) => {
+      if (error) {
+        throw new Error(error.message || fallback);
+      }
+    };
 
     switch (action) {
       // ---- User Management ----
@@ -128,20 +133,39 @@ Deno.serve(async (req) => {
         return respond({});
       }
       case "delete_event": {
-        const { data: eventChats } = await supabaseAdmin
+        const { data: eventChats, error: eventChatsErr } = await supabaseAdmin
           .from("chats")
           .select("id")
           .eq("event_id", target_id);
+        assertNoDbError(eventChatsErr, "Failed to load event chats");
+
         const chatIds = (eventChats || []).map((c: { id: string }) => c.id);
         if (chatIds.length > 0) {
-          await supabaseAdmin.from("messages").delete().in("chat_id", chatIds);
-          await supabaseAdmin.from("chat_participants").delete().in("chat_id", chatIds);
-          await supabaseAdmin.from("chats").delete().in("id", chatIds);
+          const { error: deleteMessagesErr } = await supabaseAdmin.from("messages").delete().in("chat_id", chatIds);
+          assertNoDbError(deleteMessagesErr, "Failed to delete chat messages");
+          const { error: deleteParticipantsErr } = await supabaseAdmin.from("chat_participants").delete().in("chat_id", chatIds);
+          assertNoDbError(deleteParticipantsErr, "Failed to delete chat participants");
+          const { error: deleteChatsErr } = await supabaseAdmin.from("chats").delete().in("id", chatIds);
+          assertNoDbError(deleteChatsErr, "Failed to delete chats");
         }
-        await supabaseAdmin.from("event_votes").delete().eq("event_id", target_id);
-        await supabaseAdmin.from("event_photos").delete().eq("event_id", target_id);
-        await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
-        await supabaseAdmin.from("events").delete().eq("id", target_id);
+
+        const { error: deleteVotesErr } = await supabaseAdmin.from("event_votes").delete().eq("event_id", target_id);
+        assertNoDbError(deleteVotesErr, "Failed to delete event votes");
+        const { error: deletePhotosErr } = await supabaseAdmin.from("event_photos").delete().eq("event_id", target_id);
+        assertNoDbError(deletePhotosErr, "Failed to delete event photos");
+        const { error: deleteRegsErr } = await supabaseAdmin.from("event_registrations").delete().eq("event_id", target_id);
+        assertNoDbError(deleteRegsErr, "Failed to delete event registrations");
+        const { error: deleteEventErr } = await supabaseAdmin.from("events").delete().eq("id", target_id);
+        assertNoDbError(deleteEventErr, "Failed to delete event");
+
+        const { data: remainingEvent, error: verifyErr } = await supabaseAdmin
+          .from("events")
+          .select("id")
+          .eq("id", target_id)
+          .maybeSingle();
+        assertNoDbError(verifyErr, "Failed to verify event deletion");
+        if (remainingEvent) return respondErr("Event deletion was not completed", 500);
+
         return respond({});
       }
       case "approve_registration": {

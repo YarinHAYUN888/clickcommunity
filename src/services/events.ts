@@ -111,6 +111,7 @@ export async function getCalendarEvents(
   const { data: events, error } = await supabase
     .from('events')
     .select('*')
+    .in('status', ['open', 'almost_full', 'full', 'past'])
     .gte('date', startDate)
     .lte('date', endDate)
     .order('date', { ascending: true });
