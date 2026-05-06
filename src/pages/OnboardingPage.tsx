@@ -56,6 +56,7 @@ const interestsList = [
 type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
 
 async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
+  console.info('[saveProfileToSupabase] start', { userId });
   const dob = data.dateOfBirth
     ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
     : null;
@@ -63,6 +64,8 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
   const profileData: ProfilesInsert = {
     user_id: userId,
     updated_at: new Date().toISOString(),
+    profile_completed: true,
+    image_upload_status: 'success',
   };
   if (data.firstName) profileData.first_name = data.firstName;
   if (data.lastName !== undefined && data.lastName !== null) {
@@ -92,6 +95,7 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
     console.error('Profile upsert error:', error);
     throw new Error('profile_save_failed');
   }
+  console.info('[saveProfileToSupabase] success', { userId, hasAvatar: !!profileData.avatar_url });
 }
 
 export default function OnboardingPage() {
@@ -867,7 +871,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean }> => {
+  const completeRegistration = useCallback(async (): Promise<void> => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
 
@@ -908,8 +912,8 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     }
 
     const uid = verifyData.user.id;
-    let profileSyncFailed = false;
     try {
+      console.info('[onboarding] photo upload start', { userId: uid, photoCount: data.photos?.length || 0 });
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
       await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
       try {
@@ -935,7 +939,15 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       }
     } catch (e) {
       console.error('Profile or photo upload failed:', e);
-      profileSyncFailed = true;
+      await supabase
+        .from('profiles')
+        .update({
+          profile_completed: false,
+          image_upload_status: 'failed',
+          ai_summary: 'Profile sync failed after auth creation',
+        })
+        .eq('user_id', uid);
+      throw new Error('profile_save_failed');
     }
 
     const refRaw =
@@ -951,7 +963,6 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     } catch (e) {
       console.warn('claim-signup-rewards:', e);
     }
-    return { profileSyncFailed };
   }, [data]);
 
   const handleSendCode = useCallback(async () => {
@@ -1031,10 +1042,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         return;
       }
 
-      const result = await completeRegistration();
-      if (result.profileSyncFailed) {
-        toast.warning('החשבון נוצר בהצלחה, אך סנכרון פרטי הפרופיל נכשל. ניתן להשלים/לעדכן בפרופיל.');
-      }
+      await completeRegistration();
       onComplete();
     } catch (e) {
       console.error('Verify exception:', e);

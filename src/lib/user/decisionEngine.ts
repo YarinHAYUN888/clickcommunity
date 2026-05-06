@@ -6,6 +6,8 @@ export type UserSuitabilityState = 'active' | 'pending' | 'shadow' | 'blocked';
 export interface DecisionEngineInput {
   label: SuitabilityLabel;
   image: AnalyzeImageResult;
+  aiDecision?: 'approved' | 'pending' | 'rejected';
+  aiConfidence?: number;
 }
 
 export interface DecisionEngineOutput {
@@ -24,6 +26,9 @@ export interface DecisionEngineOutput {
 export function runDecisionEngine(ai: DecisionEngineInput): DecisionEngineOutput {
   const needsAiReview = ai.label === 'not_fit' || ai.label === 'borderline';
   const badImg = !ai.image.valid;
+  const aiRejected = ai.aiDecision === 'rejected';
+  const aiPending = ai.aiDecision === 'pending';
+  const aiConfidence = Number.isFinite(ai.aiConfidence) ? Number(ai.aiConfidence) : 0;
 
   const risk_flags: string[] = [];
   if (ai.label === 'not_fit') risk_flags.push('ai_label_not_fit');
@@ -33,10 +38,12 @@ export function runDecisionEngine(ai: DecisionEngineInput): DecisionEngineOutput
   let status: UserSuitabilityState;
   let is_shadow = false;
 
-  if (ai.label === 'not_fit' && badImg) {
+  if (aiRejected && aiConfidence >= 0.75) {
+    status = 'blocked';
+  } else if (ai.label === 'not_fit' && badImg) {
     status = 'shadow';
     is_shadow = true;
-  } else if (needsAiReview || badImg) {
+  } else if (aiPending || needsAiReview || badImg) {
     status = 'pending';
   } else {
     status = 'active';

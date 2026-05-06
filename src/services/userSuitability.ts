@@ -12,6 +12,7 @@ export interface RunUserAnalysisPayload extends ProfileAnalysisInput {
  * After OTP: AI + image checks, persist suitability fields on profiles (by auth user_id).
  */
 export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authUserId: string): Promise<void> {
+  console.info('[runUserAnalysis] start', { authUserId });
   const [aiResult, imageResult] = await Promise.all([
     analyzeUser({
       firstName: profileData.firstName,
@@ -29,8 +30,19 @@ export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authU
     analyzePrimaryPhotos(profileData.photos || []),
   ]);
 
-  const decision = runDecisionEngine({ label: aiResult.label, image: imageResult });
-  const risk_flags = [...decision.risk_flags, ...aiResult.reasons.map((r) => `ai:${r}`)];
+  const decision = runDecisionEngine({
+    label: aiResult.label,
+    image: imageResult,
+    aiDecision: aiResult.decision,
+    aiConfidence: aiResult.confidence,
+  });
+  const risk_flags = [...decision.risk_flags, ...aiResult.flags.map((r) => `ai:${r}`)];
+  const moderationStatus =
+    decision.status === 'active'
+      ? 'approved'
+      : decision.status === 'blocked'
+      ? 'rejected'
+      : 'pending';
 
   const { error } = await supabase
     .from('profiles')
@@ -39,6 +51,10 @@ export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authU
       is_shadow: decision.is_shadow,
       risk_flags,
       ai_summary: [decision.ai_summary, ...aiResult.reasons].filter(Boolean).join(' · '),
+      moderation_status: moderationStatus,
+      moderation_reason: aiResult.reason,
+      moderation_confidence: aiResult.confidence,
+      moderation_flags: aiResult.flags,
     })
     .eq('user_id', authUserId);
 
@@ -46,4 +62,5 @@ export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authU
     console.error('runUserAnalysis update failed:', error);
     throw error;
   }
+  console.info('[runUserAnalysis] success', { authUserId, moderationStatus, suitability: decision.status });
 }

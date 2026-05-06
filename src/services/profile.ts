@@ -95,6 +95,7 @@ export async function cancelSubscription(userId: string) {
 
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
 export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
+  console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: sources.length });
   const projectUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? '';
   const out: string[] = [];
   for (let i = 0; i < sources.length; i++) {
@@ -118,10 +119,18 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
     }
     out.push(s);
   }
+  console.info('[uploadOnboardingPhotosFromDataUrls] success', { userId, uploadedCount: out.length });
   return out;
 }
 
 export async function uploadProfilePhoto(userId: string, file: File, index: number) {
+  console.info('[uploadProfilePhoto] start', { userId, index, fileName: file.name, fileType: file.type, size: file.size });
+  if (!file.type.startsWith('image/')) {
+    throw new Error('invalid_image_type');
+  }
+  if (file.size < 800) {
+    throw new Error('image_too_small');
+  }
   const fileExt = file.name.split('.').pop();
   const filePath = `${userId}/${index}-${Date.now()}.${fileExt}`;
 
@@ -129,9 +138,13 @@ export async function uploadProfilePhoto(userId: string, file: File, index: numb
     .from('photos')
     .upload(filePath, file, { upsert: true });
 
-  if (uploadError) throw uploadError;
+  if (uploadError) {
+    console.error('[uploadProfilePhoto] upload failed', { userId, index, filePath, error: uploadError.message });
+    throw uploadError;
+  }
 
   const { data } = supabase.storage.from('photos').getPublicUrl(filePath);
+  console.info('[uploadProfilePhoto] success', { userId, index, filePath, publicUrl: data.publicUrl });
   return data.publicUrl;
 }
 

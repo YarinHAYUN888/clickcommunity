@@ -24,6 +24,12 @@ export interface SupabaseProfile {
   is_shadow?: boolean | null;
   risk_flags?: unknown;
   ai_summary?: string | null;
+  moderation_status?: string | null;
+  moderation_reason?: string | null;
+  moderation_confidence?: number | null;
+  moderation_flags?: unknown;
+  profile_completed?: boolean | null;
+  image_upload_status?: string | null;
 }
 
 export interface CurrentUser {
@@ -51,6 +57,7 @@ export function useCurrentUser(): CurrentUser {
         .maybeSingle()
         .then(async ({ data, error }) => {
           if (error) console.error('useCurrentUser fetchProfile:', error.message);
+          if (!error) console.info('[useCurrentUser] profile fetch success', { userId, found: !!data });
           let profileData = (data as SupabaseProfile | null) ?? null;
           if (!profileData) {
             const firstName =
@@ -83,6 +90,14 @@ export function useCurrentUser(): CurrentUser {
           }
 
           if (mountedRef.current) setProfile(profileData);
+          if (profileData) {
+            console.info('[useCurrentUser] profile state', {
+              userId,
+              suitability: profileData.suitability_status,
+              completed: profileData.profile_completed,
+              imageUpload: profileData.image_upload_status,
+            });
+          }
           if (mountedRef.current) setLoading(false);
         })
         .catch((e) => {

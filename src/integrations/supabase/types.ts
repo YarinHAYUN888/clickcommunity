@@ -552,6 +552,12 @@ export type Database = {
           questionnaire_responses: Json
           suitability_status: string
           ai_summary: string | null
+          moderation_status: string
+          moderation_reason: string | null
+          moderation_confidence: number | null
+          moderation_flags: Json
+          profile_completed: boolean
+          image_upload_status: string
           is_shadow: boolean
           tiktok: string | null
           updated_at: string
@@ -591,6 +597,12 @@ export type Database = {
           questionnaire_responses?: Json
           suitability_status?: string
           ai_summary?: string | null
+          moderation_status?: string
+          moderation_reason?: string | null
+          moderation_confidence?: number | null
+          moderation_flags?: Json
+          profile_completed?: boolean
+          image_upload_status?: string
           is_shadow?: boolean
           tiktok?: string | null
           updated_at?: string
@@ -630,6 +642,12 @@ export type Database = {
           questionnaire_responses?: Json
           suitability_status?: string
           ai_summary?: string | null
+          moderation_status?: string
+          moderation_reason?: string | null
+          moderation_confidence?: number | null
+          moderation_flags?: Json
+          profile_completed?: boolean
+          image_upload_status?: string
           is_shadow?: boolean
           tiktok?: string | null
           updated_at?: string

@@ -13,6 +13,10 @@ export default function SuitabilityGate() {
   useEffect(() => {
     if (loading || !authId) return;
     if (profile?.super_role) return;
+    if (profile?.profile_completed === false || profile?.image_upload_status === 'failed') {
+      navigate('/onboarding/account-verification', { replace: true });
+      return;
+    }
     const s = profile?.suitability_status ?? 'active';
     if (s === 'pending') {
       navigate('/pending-review', { replace: true });

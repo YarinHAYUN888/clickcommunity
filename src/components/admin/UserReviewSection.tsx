@@ -20,7 +20,7 @@ export function UserReviewSection() {
     const { count, error } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
-      .neq('suitability_status', 'active');
+      .eq('moderation_status', 'pending');
     if (!error && count != null) setBadgeCount(count);
   }, []);
 
@@ -29,7 +29,7 @@ export function UserReviewSection() {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('suitability_status', 'active')
+      .eq('moderation_status', 'pending')
       .order('updated_at', { ascending: false })
       .limit(100);
     if (error) {
@@ -68,7 +68,22 @@ export function UserReviewSection() {
     setBusyId(userId);
     try {
       const is_shadow = suitability_status === 'shadow';
+      const moderation_status =
+        suitability_status === 'active'
+          ? 'approved'
+          : suitability_status === 'blocked'
+          ? 'rejected'
+          : 'pending';
+      const { data: admin } = await supabase.auth.getUser();
       await updateProfileSuitability(userId, { suitability_status, is_shadow });
+      await supabase
+        .from('profiles')
+        .update({
+          moderation_status,
+          moderation_reviewed_at: new Date().toISOString(),
+          moderation_reviewed_by: admin.user?.id ?? null,
+        })
+        .eq('user_id', userId);
       await loadRows();
     } catch (e) {
       console.error(e);
@@ -179,6 +194,11 @@ export function UserReviewSection() {
                             {r.ai_summary}
                           </p>
                         )}
+                        <div className="text-[11px] text-muted-foreground bg-muted/30 rounded-xl p-2 space-y-1">
+                          <p>החלטת AI: <span className="text-foreground font-semibold">{r.moderation_status || 'pending'}</span></p>
+                          <p>ביטחון: <span className="text-foreground font-semibold">{r.moderation_confidence ?? '—'}</span></p>
+                          <p>סיבה: <span className="text-foreground font-semibold">{r.moderation_reason || '—'}</span></p>
+                        </div>
                         <div className="flex flex-wrap gap-2 justify-end">
                           <button
                             type="button"
@@ -186,7 +206,7 @@ export function UserReviewSection() {
                             onClick={() => void act(r.user_id, 'active')}
                             className="px-3 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground disabled:opacity-50 transition-opacity"
                           >
-                            אישור
+                            אישור לקהילה
                           </button>
                           <button
                             type="button"
@@ -202,7 +222,7 @@ export function UserReviewSection() {
                             onClick={() => void act(r.user_id, 'blocked')}
                             className="px-3 py-2 rounded-xl text-xs font-semibold text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors"
                           >
-                            חסימה
+                            דחייה
                           </button>
                         </div>
                       </GlassCard>

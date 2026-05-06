@@ -9,6 +9,10 @@ export interface AnalyzeUserResult {
   score: number;
   label: SuitabilityLabel;
   reasons: string[];
+  decision: 'approved' | 'pending' | 'rejected';
+  confidence: number;
+  reason: string;
+  flags: string[];
 }
 
 export interface ProfileAnalysisInput {
@@ -44,7 +48,11 @@ Return JSON only:
 {
 "score": number (0-100),
 "label": "fit" | "borderline" | "not_fit",
-"reasons": string[]
+"reasons": string[],
+"decision": "approved" | "pending" | "rejected",
+"confidence": number (0-1),
+"reason": string,
+"flags": string[]
 }`;
 
 /** Local signals when OpenAI is unavailable — catches obvious test/troll/junk patterns. */
@@ -152,7 +160,18 @@ function mockAnalyze(input: ProfileAnalysisInput): AnalyzeUserResult {
   const label: SuitabilityLabel =
     score >= 72 ? 'fit' : score >= 48 ? 'borderline' : 'not_fit';
 
-  return { score, label, reasons: [...new Set(reasons)] };
+  const decision = label === 'fit' ? 'approved' : label === 'borderline' ? 'pending' : 'rejected';
+  const confidence = Number((Math.max(0.35, Math.min(0.95, score / 100))).toFixed(3));
+  const uniqReasons = [...new Set(reasons)];
+  return {
+    score,
+    label,
+    reasons: uniqReasons,
+    decision,
+    confidence,
+    reason: uniqReasons[0] || 'mock_fallback',
+    flags: uniqReasons,
+  };
 }
 
 function parseJsonResponse(raw: string): AnalyzeUserResult | null {
@@ -163,7 +182,31 @@ function parseJsonResponse(raw: string): AnalyzeUserResult | null {
     const reasons = Array.isArray(j.reasons) ? j.reasons.filter((r): r is string => typeof r === 'string') : [];
     if (!Number.isFinite(score) || score < 0 || score > 100) return null;
     if (label !== 'fit' && label !== 'borderline' && label !== 'not_fit') return null;
-    return { score, label, reasons };
+
+    const decisionRaw = String(j.decision || '').toLowerCase();
+    const confidenceRaw = Number(j.confidence);
+    const reasonRaw = typeof j.reason === 'string' ? j.reason.trim() : '';
+    const flagsRaw = Array.isArray(j.flags) ? j.flags.filter((f): f is string => typeof f === 'string') : [];
+
+    const fallbackDecision = label === 'fit' ? 'approved' : label === 'borderline' ? 'pending' : 'rejected';
+    const decision =
+      decisionRaw === 'approved' || decisionRaw === 'pending' || decisionRaw === 'rejected'
+        ? decisionRaw
+        : fallbackDecision;
+
+    const confidence = Number.isFinite(confidenceRaw)
+      ? Math.max(0, Math.min(1, confidenceRaw))
+      : Number((score / 100).toFixed(3));
+
+    return {
+      score,
+      label,
+      reasons,
+      decision,
+      confidence,
+      reason: reasonRaw || reasons[0] || 'no_reason_provided',
+      flags: flagsRaw.length ? flagsRaw : reasons,
+    };
   } catch {
     return null;
   }
@@ -217,6 +260,10 @@ export async function analyzeUser(input: ProfileAnalysisInput): Promise<AnalyzeU
         score: Math.min(parsed.score, 44),
         label: 'not_fit',
         reasons: [...parsed.reasons, ...local],
+        decision: 'rejected',
+        confidence: Math.max(parsed.confidence, 0.75),
+        reason: 'local_risk_override_high',
+        flags: [...parsed.flags, ...local],
       };
     }
     if (local.length === 1 && parsed.label === 'fit' && parsed.score > 60) {
@@ -224,6 +271,10 @@ export async function analyzeUser(input: ProfileAnalysisInput): Promise<AnalyzeU
         score: Math.min(parsed.score, 55),
         label: 'borderline',
         reasons: [...parsed.reasons, ...local],
+        decision: 'pending',
+        confidence: Math.max(parsed.confidence, 0.6),
+        reason: 'local_risk_override_medium',
+        flags: [...parsed.flags, ...local],
       };
     }
 

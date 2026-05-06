@@ -62,13 +62,24 @@ export async function performAdminAction(
 
 export async function updateProfileSuitability(
   targetUserId: string,
-  payload: { suitability_status: 'active' | 'pending' | 'shadow' | 'blocked'; is_shadow: boolean },
+  payload: {
+    suitability_status: 'active' | 'pending' | 'shadow' | 'blocked';
+    is_shadow: boolean;
+    moderation_status?: 'approved' | 'pending' | 'rejected';
+    moderation_reason?: string | null;
+    moderation_reviewed_at?: string | null;
+    moderation_reviewed_by?: string | null;
+  },
 ) {
   const { error } = await supabase
     .from('profiles')
     .update({
       suitability_status: payload.suitability_status,
       is_shadow: payload.is_shadow,
+      moderation_status: payload.moderation_status,
+      moderation_reason: payload.moderation_reason,
+      moderation_reviewed_at: payload.moderation_reviewed_at,
+      moderation_reviewed_by: payload.moderation_reviewed_by,
     })
     .eq('user_id', targetUserId);
   if (error) throw error;
