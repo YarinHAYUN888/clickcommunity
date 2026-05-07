@@ -71,48 +71,45 @@ export async function updateProfileSuitability(
     moderation_reviewed_by?: string | null;
   },
 ) {
-  const baseUpdate: Record<string, unknown> = {
+  let updatePayload: Record<string, unknown> = {
     suitability_status: payload.suitability_status,
     is_shadow: payload.is_shadow,
   };
 
   if (payload.moderation_status !== undefined) {
-    baseUpdate.moderation_status = payload.moderation_status;
+    updatePayload.moderation_status = payload.moderation_status;
   }
   if (payload.moderation_reason !== undefined) {
-    baseUpdate.moderation_reason = payload.moderation_reason;
+    updatePayload.moderation_reason = payload.moderation_reason;
   }
   if (payload.moderation_reviewed_at !== undefined) {
-    baseUpdate.moderation_reviewed_at = payload.moderation_reviewed_at;
+    updatePayload.moderation_reviewed_at = payload.moderation_reviewed_at;
   }
   if (payload.moderation_reviewed_by !== undefined) {
-    baseUpdate.moderation_reviewed_by = payload.moderation_reviewed_by;
+    updatePayload.moderation_reviewed_by = payload.moderation_reviewed_by;
   }
 
-  const { error } = await supabase
-    .from('profiles')
-    .update(baseUpdate)
-    .eq('user_id', targetUserId);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { error } = await supabase
+      .from('profiles')
+      .update(updatePayload)
+      .eq('user_id', targetUserId);
 
-  if (!error) return;
+    if (!error) return;
 
-  const errorMessage = String(error.message || '');
-  const missingReviewedColumns =
-    errorMessage.includes('moderation_reviewed_at') ||
-    errorMessage.includes('moderation_reviewed_by');
+    const errorMessage = String(error.message || '');
+    const missingColumnMatch = errorMessage.match(/Could not find the '([^']+)' column/i);
+    const missingColumn = missingColumnMatch?.[1];
 
-  if (!missingReviewedColumns) throw error;
+    if (!missingColumn) throw error;
+    if (!(missingColumn in updatePayload)) throw error;
 
-  // Backward-compatible fallback for environments where reviewed_* columns are not migrated yet.
-  const fallbackUpdate = { ...baseUpdate };
-  delete fallbackUpdate.moderation_reviewed_at;
-  delete fallbackUpdate.moderation_reviewed_by;
+    const nextPayload = { ...updatePayload };
+    delete nextPayload[missingColumn];
+    updatePayload = nextPayload;
+  }
 
-  const { error: fallbackError } = await supabase
-    .from('profiles')
-    .update(fallbackUpdate)
-    .eq('user_id', targetUserId);
-  if (fallbackError) throw fallbackError;
+  throw new Error('Profile suitability update failed after compatibility retries');
 }
 
 export async function uploadEventCover(eventId: string, file: File) {
