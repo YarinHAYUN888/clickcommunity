@@ -71,18 +71,48 @@ export async function updateProfileSuitability(
     moderation_reviewed_by?: string | null;
   },
 ) {
+  const baseUpdate: Record<string, unknown> = {
+    suitability_status: payload.suitability_status,
+    is_shadow: payload.is_shadow,
+  };
+
+  if (payload.moderation_status !== undefined) {
+    baseUpdate.moderation_status = payload.moderation_status;
+  }
+  if (payload.moderation_reason !== undefined) {
+    baseUpdate.moderation_reason = payload.moderation_reason;
+  }
+  if (payload.moderation_reviewed_at !== undefined) {
+    baseUpdate.moderation_reviewed_at = payload.moderation_reviewed_at;
+  }
+  if (payload.moderation_reviewed_by !== undefined) {
+    baseUpdate.moderation_reviewed_by = payload.moderation_reviewed_by;
+  }
+
   const { error } = await supabase
     .from('profiles')
-    .update({
-      suitability_status: payload.suitability_status,
-      is_shadow: payload.is_shadow,
-      moderation_status: payload.moderation_status,
-      moderation_reason: payload.moderation_reason,
-      moderation_reviewed_at: payload.moderation_reviewed_at,
-      moderation_reviewed_by: payload.moderation_reviewed_by,
-    })
+    .update(baseUpdate)
     .eq('user_id', targetUserId);
-  if (error) throw error;
+
+  if (!error) return;
+
+  const errorMessage = String(error.message || '');
+  const missingReviewedColumns =
+    errorMessage.includes('moderation_reviewed_at') ||
+    errorMessage.includes('moderation_reviewed_by');
+
+  if (!missingReviewedColumns) throw error;
+
+  // Backward-compatible fallback for environments where reviewed_* columns are not migrated yet.
+  const fallbackUpdate = { ...baseUpdate };
+  delete fallbackUpdate.moderation_reviewed_at;
+  delete fallbackUpdate.moderation_reviewed_by;
+
+  const { error: fallbackError } = await supabase
+    .from('profiles')
+    .update(fallbackUpdate)
+    .eq('user_id', targetUserId);
+  if (fallbackError) throw fallbackError;
 }
 
 export async function uploadEventCover(eventId: string, file: File) {

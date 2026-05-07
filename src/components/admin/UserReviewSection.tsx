@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ClipboardList, X, User } from 'lucide-react';
+import { toast } from 'sonner';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
 import { updateProfileSuitability } from '@/services/admin';
@@ -75,18 +76,18 @@ export function UserReviewSection() {
           ? 'rejected'
           : 'pending';
       const { data: admin } = await supabase.auth.getUser();
-      await updateProfileSuitability(userId, { suitability_status, is_shadow });
-      await supabase
-        .from('profiles')
-        .update({
-          moderation_status,
-          moderation_reviewed_at: new Date().toISOString(),
-          moderation_reviewed_by: admin.user?.id ?? null,
-        })
-        .eq('user_id', userId);
+      await updateProfileSuitability(userId, {
+        suitability_status,
+        is_shadow,
+        moderation_status,
+        moderation_reviewed_at: new Date().toISOString(),
+        moderation_reviewed_by: admin.user?.id ?? null,
+      });
       await loadRows();
+      toast.success('סטטוס המשתמש עודכן בהצלחה');
     } catch (e) {
       console.error(e);
+      toast.error(e instanceof Error ? e.message : 'עדכון סטטוס נכשל');
     } finally {
       setBusyId(null);
     }
