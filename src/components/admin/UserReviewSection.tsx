@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
 import { updateProfileSuitability } from '@/services/admin';
+import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import type { Database } from '@/integrations/supabase/types';
 import { formatQuestionnaireForAdmin } from '@/data/introductionQuestionnaire';
 import { VoiceIntroReviewPlayer } from '@/components/admin/VoiceIntroReviewPlayer';
@@ -76,6 +77,10 @@ export function UserReviewSection() {
           : suitability_status === 'blocked'
           ? 'rejected'
           : 'pending';
+      const row = rows.find((r) => r.user_id === userId);
+      const hasPhotos =
+        (Array.isArray(row?.photos) && row.photos.some((u) => typeof u === 'string' && u.length > 0)) ||
+        !!(row?.avatar_url && String(row.avatar_url).length > 0);
       const { data: admin } = await supabase.auth.getUser();
       await updateProfileSuitability(userId, {
         suitability_status,
@@ -83,8 +88,13 @@ export function UserReviewSection() {
         moderation_status,
         moderation_reviewed_at: new Date().toISOString(),
         moderation_reviewed_by: admin.user?.id ?? null,
+        ...(suitability_status === 'active' && {
+          profile_completed: true,
+          ...(hasPhotos ? { image_upload_status: 'success' as const } : {}),
+        }),
       });
       await loadRows();
+      notifyProfileUpdated(userId);
       toast.success('סטטוס המשתמש עודכן בהצלחה');
     } catch (e) {
       console.error(e);

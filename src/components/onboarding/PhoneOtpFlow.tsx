@@ -122,7 +122,7 @@ export default function PhoneOtpFlow({ onVerified, initialPhone = '', showDevByp
       });
       if (verifyErr) {
         console.error('Verify OTP error:', verifyErr);
-        setOtpError('הקוד שגוי. נסה/י שוב.');
+        setOtpError('קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.');
         setShakeOtp(true);
         setOtp(['', '', '', '', '', '']);
         setTimeout(() => inputRefs.current[0]?.focus(), 350);
@@ -145,6 +145,10 @@ export default function PhoneOtpFlow({ onVerified, initialPhone = '', showDevByp
 
   const handleResend = async () => {
     const cleaned = phone.replace(/[-\s]/g, '').replace(/^0/, '');
+    if (!/^5\d{8}$/.test(cleaned)) {
+      setOtpError('נדרש מספר טלפון מלא (9 ספרות, מתחיל ב-5). לא ניתן לשלוח קוד ל-+972 בלבד.');
+      return;
+    }
     setOtp(['', '', '', '', '', '']);
     setOtpError('');
     setResendTimer(60);

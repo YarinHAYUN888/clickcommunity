@@ -5,6 +5,8 @@ import { Eye, EyeOff } from 'lucide-react';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import BackToLandingButton from '@/components/ui/BackToLandingButton';
 import { supabase } from '@/integrations/supabase/client';
+import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
+import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import ClicksLogo from '@/components/ui/ClicksLogo';
 
 export default function LoginPage() {
@@ -35,7 +37,19 @@ export default function LoginPage() {
         return;
       }
 
-      navigate('/clicks');
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) {
+        setError('לא הצלחנו לזהות את המשתמש. נסה/י שוב.');
+        setLoading(false);
+        return;
+      }
+
+      const { route, profile } = await resolvePostAuthRedirect(uid);
+      console.log("Loaded profile after login:", profile);
+      console.log("Redirecting after login:", route);
+      if (route === '/clicks') notifyProfileUpdated(uid);
+      navigate(route, { replace: true });
     } catch (e) {
       console.error('Login exception:', e);
       setError('שגיאה בהתחברות. נסה/י שוב.');

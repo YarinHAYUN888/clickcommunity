@@ -36,6 +36,7 @@ import AdminSubscriptionsPage from "./pages/admin/AdminSubscriptionsPage";
 import AdminAutomationPage from "./pages/admin/AdminAutomationPage";
 import PendingReviewPage from "./pages/PendingReviewPage";
 import BlockedPage from "./pages/BlockedPage";
+import CompleteProfilePage from "./pages/CompleteProfilePage";
 import SuitabilityGate from "@/components/guards/SuitabilityGate";
 
 const queryClient = new QueryClient();
@@ -65,6 +66,7 @@ const App = () => (
 
                 <Route path="/pending-review" element={<PendingReviewPage />} />
                 <Route path="/blocked" element={<BlockedPage />} />
+                <Route path="/complete-profile" element={<CompleteProfilePage />} />
 
                 <Route element={<SuitabilityGate />}>
                   <Route element={<MainLayout />}>
@@ -74,9 +76,10 @@ const App = () => (
                     <Route path="/events/:eventId/vote" element={<EventVotePage />} />
                     <Route path="/chats" element={<ChatsPage />} />
                     <Route path="/chats/:chatId" element={<ChatConversationPage />} />
-                    <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/profile/edit" element={<EditProfilePage />} />
-                    <Route path="/profile/:userId" element={<ProfilePage />} />
+                    <Route path="/profile" element={<ProfilePage />} />
+                    {/* Avoid `/profile/:userId` — it can match `/profile/edit` (userId = "edit") and break the edit screen. */}
+                    <Route path="/profile/user/:userId" element={<ProfilePage />} />
                     <Route path="/subscription" element={<SubscriptionPage />} />
 
                     {/* Admin — inside MainLayout for tab bar */}

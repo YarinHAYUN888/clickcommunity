@@ -16,7 +16,7 @@ export default function MainLayout() {
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
-              initial={{ opacity: 0, scale: 0.99, filter: 'blur(4px)' }}
+              initial={false}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               exit={{ opacity: 0, scale: 0.99, filter: 'blur(4px)' }}
               transition={springs.gentle}

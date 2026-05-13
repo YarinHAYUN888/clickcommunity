@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
+import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles } from 'lucide-react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -10,7 +12,6 @@ import BackToLandingButton from '@/components/ui/BackToLandingButton';
 import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
-import ClicksLogo from '@/components/ui/ClicksLogo';
 import { claimSignupRewards, fetchReferrerPreview } from '@/services/points';
 import {
   buildOtpWebhookPayload,
@@ -107,6 +108,16 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
     console.error('Profile upsert error:', error);
     throw new Error('profile_save_failed');
   }
+  const { error: flagsErr } = await supabase
+    .from('profiles')
+    .update({
+      profile_completed: true,
+      image_upload_status: 'success',
+    })
+    .eq('user_id', userId);
+  if (flagsErr && import.meta.env.DEV) {
+    console.warn('[saveProfileToSupabase] profile_completed / image_upload_status patch:', flagsErr.message);
+  }
   console.info('[saveProfileToSupabase] success', { userId, hasAvatar: !!profileData.avatar_url });
 }
 
@@ -124,7 +135,21 @@ export default function OnboardingPage() {
     }
   }, [step, navigate]);
 
-  const [showCelebration, setShowCelebration] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user || cancelled) return;
+      const { route } = await resolvePostAuthRedirect(session.user.id);
+      if (cancelled) return;
+      navigate(route, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   const goBack = () => {
     if (currentIndex > 0) navigate(`/onboarding/${steps[currentIndex - 1]}`);
@@ -136,16 +161,6 @@ export default function OnboardingPage() {
       navigate(`/onboarding/${steps[currentIndex + 1]}`);
     }
   };
-
-  const handleRegistrationComplete = () => {
-    setShowCelebration(true);
-    setTimeout(() => {
-      clearData();
-      navigate('/clicks');
-    }, 2000);
-  };
-
-  if (showCelebration) return <CelebrationScreen />;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -193,7 +208,7 @@ export default function OnboardingPage() {
               <IntroductionQuestionnaireStep data={data} updateData={updateData} onNext={goNext} />
             )}
             {step === 'account-verification' && (
-              <VerifyStep data={data} updateData={updateData} onComplete={handleRegistrationComplete} />
+              <VerifyStep data={data} updateData={updateData} clearData={clearData} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -842,7 +857,8 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 }
 
 // ---- STEP 6: Verify ----
-function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: any; onComplete: () => void }) {
+function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
+  const navigate = useNavigate();
   const { voiceIntroDraftRef } = useOnboarding();
   const [method, setMethod] = useState<'phone' | 'email'>(data.verificationMethod || '');
   const [codeSent, setCodeSent] = useState(false);
@@ -851,10 +867,14 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
   const [shakeOtp, setShakeOtp] = useState(false);
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [postAuthBusy, setPostAuthBusy] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [error, setError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const generatedCodeRef = useRef<string>('');
+
+  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  const phoneLooksValid = /^5\d{8}$/.test(phoneClean);
 
   const [inviterName, setInviterName] = useState<string | null>(null);
   useEffect(() => {
@@ -884,7 +904,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean }> => {
+  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean; userId: string }> => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
 
@@ -980,12 +1000,16 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
     } catch (e) {
       console.warn('claim-signup-rewards:', e);
     }
-    return { profileSyncFailed };
+    return { profileSyncFailed, userId: uid };
   }, [data, voiceIntroDraftRef]);
 
   const handleSendCode = useCallback(async () => {
     if (!method) return;
     setError('');
+    if (method === 'phone' && !phoneLooksValid) {
+      setError('נדרש מספר טלפון ישראלי תקין. חזרו לשלב יצירת החשבון.');
+      return;
+    }
     setSending(true);
 
     try {
@@ -1015,7 +1039,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
     }
     setSending(false);
-  }, [method, updateData, data]);
+  }, [method, updateData, data, phoneLooksValid]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -1048,24 +1072,31 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
   };
 
   const verifyOtp = async (code: string) => {
-    if (code.length !== 6 || verifying) return;
+    if (code.length !== 6 || verifying || postAuthBusy) return;
     setVerifying(true);
     try {
       if (code !== generatedCodeRef.current) {
-        setOtpError('הקוד שגוי. נסה/י שוב.');
+        setOtpError('קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.');
         setShakeOtp(true);
         setOtp(['', '', '', '', '', '']);
         setTimeout(() => inputRefs.current[0]?.focus(), 350);
-        setVerifying(false);
         return;
       }
 
+      setPostAuthBusy(true);
       const result = await completeRegistration();
+      console.log("OTP verified successfully");
+      const { route, profile: loadedProfile } = await resolvePostAuthRedirect(result.userId);
+      console.log("Loaded profile after OTP:", loadedProfile);
+      console.log("Redirecting after OTP:", route);
       if (result.profileSyncFailed) {
         toast.warning('החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.');
       }
-      onComplete();
+      if (route === '/clicks') notifyProfileUpdated(result.userId);
+      navigate(route, { replace: true });
+      clearData();
     } catch (e) {
+      setPostAuthBusy(false);
       console.error('Verify exception:', e);
       if (e instanceof Error && 'cause' in e && e.cause !== undefined) {
         console.error('Verify exception cause:', e.cause);
@@ -1083,12 +1114,13 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       } else {
         setOtpError('שגיאה ביצירת החשבון. נסה/י שוב.');
       }
+    } finally {
+      setVerifying(false);
     }
-    setVerifying(false);
   };
 
   const handlePasteFromClipboard = async () => {
-    if (verifying) return;
+    if (verifying || postAuthBusy) return;
     setOtpError('');
     try {
       const text = await navigator.clipboard.readText();
@@ -1106,6 +1138,10 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
   };
 
   const handleResend = async () => {
+    if (method === 'phone' && !phoneLooksValid) {
+      setOtpError('נדרש מספר טלפון מלא. חזרו לשלב יצירת החשבון.');
+      return;
+    }
     setOtp(['', '', '', '', '', '']);
     setOtpError('');
     setResendTimer(60);
@@ -1132,6 +1168,14 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
   const formatTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const allEmpty = otp.every(d => d === '');
 
+  if (postAuthBusy) {
+    return (
+      <div className="space-y-6 flex flex-col items-center justify-center py-16 px-4 text-center">
+        <p className="text-muted-foreground text-base leading-relaxed">מאמתים את החשבון ומכינים את הפרופיל שלך...</p>
+      </div>
+    );
+  }
+
   if (!codeSent) {
     return (
       <div className="space-y-6">
@@ -1144,7 +1188,12 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         <div className="space-y-3">
           {(['email', 'phone'] as const).map(m => {
             const isSelected = method === m;
-            const label = m === 'email' ? `📧 אימייל — ${data.email}` : `📱 SMS — +972${data.phone.replace(/[-\s]/g, '').replace(/^0/, '')}`;
+            const label =
+              m === 'email'
+                ? `📧 אימייל — ${data.email}`
+                : phoneLooksValid
+                  ? `📱 SMS — +972${phoneClean}`
+                  : '📱 SMS — חסר מספר טלפון (חזרו לשלב יצירת החשבון)';
             return (
               <motion.button key={m} whileTap={{ scale: 0.97 }} onClick={() => setMethod(m)}
                 className="w-full h-14 rounded-[16px] px-4 text-start text-base font-medium transition-all flex items-center gap-3"
@@ -1177,7 +1226,11 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       <div>
         <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">הכנס/י את הקוד</h2>
         <p className="text-muted-foreground text-base mt-2">
-          {method === 'email' ? `שלחנו קוד ל-${data.email}` : `שלחנו קוד ל-+972-${data.phone.replace(/[-\s]/g, '').replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3')}`}
+          {method === 'email'
+            ? `שלחנו קוד ל-${data.email}`
+            : phoneLooksValid
+              ? `שלחנו קוד ל-+972-${data.phone.replace(/[-\s]/g, '').replace(/^0/, '').replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3')}`
+              : 'חסר מספר טלפון מלא — חזרו לשלב יצירת החשבון עם חץ חזרה.'}
         </p>
       </div>
 
@@ -1188,7 +1241,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
           <div key={i} className="relative">
             <input ref={el => (inputRefs.current[i] = el)} type="text" inputMode="numeric" maxLength={6}
               value={digit} onChange={e => handleOtpChange(i, e.target.value)} onKeyDown={e => handleOtpKeyDown(i, e)}
-              disabled={verifying}
+              disabled={verifying || postAuthBusy}
               className="w-12 h-14 rounded-xl text-center text-2xl font-semibold outline-none transition-all disabled:opacity-50"
               style={{ background: 'hsl(var(--card))', border: `1px solid ${otpError ? 'hsl(0 84% 60%)' : 'hsl(var(--border))'}` }} />
             {allEmpty && !digit && <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none skeleton-shimmer" />}
@@ -1202,7 +1255,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
         transition={{ delay: 0.4 }}
         type="button"
         onClick={() => void handlePasteFromClipboard()}
-        disabled={verifying}
+        disabled={verifying || postAuthBusy}
         className="w-full h-12 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
         style={{
           background: 'hsl(var(--card))',
@@ -1240,37 +1293,5 @@ function StickyButton({ disabled, onClick, label, inline }: { disabled: boolean;
         {label}
       </motion.button>
     </div>
-  );
-}
-
-// ---- Celebration Screen ----
-function CelebrationScreen() {
-  return (
-    <AnimatedBackground className="flex flex-col items-center justify-center px-6">
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {Array.from({ length: 18 }).map((_, i) => (
-          <motion.div key={i} className="absolute rounded-full"
-            style={{
-              width: 4 + Math.random() * 4, height: 4 + Math.random() * 4,
-              background: ['hsl(263 84% 55%)', 'hsl(258 95% 76%)', 'hsl(262 100% 96%)'][i % 3],
-              left: '50%', top: '50%',
-            }}
-            initial={{ scale: 0, x: 0, y: 0, opacity: 1 }}
-            animate={{ x: (Math.random() - 0.5) * 300, y: (Math.random() - 0.5) * 300, scale: [0, 1.5, 0], opacity: [1, 1, 0] }}
-            transition={{ duration: 1.5, ease: 'easeOut', delay: Math.random() * 0.3 }} />
-        ))}
-      </div>
-      <motion.div className="z-10 mb-3"
-        initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, type: 'spring', damping: 14 }}>
-        <ClicksLogo size={120} glow />
-      </motion.div>
-      <motion.h1 className="text-[32px] font-bold z-10" style={{ color: 'hsl(var(--color-primary))' }}
-        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}>
-        מעולה! הכל מוכן 🎉
-      </motion.h1>
-      <motion.p className="text-lg text-muted-foreground mt-3 z-10" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
-        ברוכ/ה הבא/ה ל-Clicks
-      </motion.p>
-    </AnimatedBackground>
   );
 }

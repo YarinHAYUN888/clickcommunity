@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
+import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
+import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { Loader2, ShieldCheck, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -26,22 +28,24 @@ export default function PendingReviewPage() {
       navigate('/', { replace: true });
       return;
     }
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('suitability_status')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (error) {
-      toast.error('לא הצלחנו לרענן סטטוס כרגע');
-      return;
-    }
-    if (data?.suitability_status === 'active') {
+    const { route, profile } = await resolvePostAuthRedirect(user.id);
+    if (route === '/clicks') {
+      toast.success('הפרופיל אושר — מעבירים אותך לאפליקציה');
+      notifyProfileUpdated(user.id);
       navigate('/clicks', { replace: true });
       return;
     }
-    if (data?.suitability_status === 'blocked') {
+    if (route === '/blocked') {
       navigate('/blocked', { replace: true });
       return;
+    }
+    if (route === '/complete-profile') {
+      toast.message('נדרש להשלים פרטים בפרופיל. מעבירים לעמוד ההשלמה.');
+      navigate('/complete-profile', { replace: true });
+      return;
+    }
+    if (import.meta.env.DEV) {
+      console.info('[PendingReviewPage] refresh still pending', profile);
     }
     toast.message('הפרופיל עדיין ממתין לבדיקה');
   }
@@ -58,12 +62,10 @@ export default function PendingReviewPage() {
           <ShieldCheck size={28} className="text-primary" />
         </div>
         <h1 className="text-xl md:text-2xl font-bold text-foreground leading-snug">
-          הפרופיל שלך נשלח לבדיקה על ידי צוות Click
+          הפרופיל שלך נמצא בבדיקה
         </h1>
         <p className="text-muted-foreground text-sm md:text-base leading-relaxed">
-          אנחנו מבצעים אימות קצר כדי לשמור על קהילה איכותית ובטוחה לכולם.
-          <br />
-          בדרך כלל זה לוקח עד 24 שעות.
+          הצוות שלנו בודק את הפרטים שלך כדי לשמור על קהילה איכותית ובטוחה. נעדכן אותך בהקדם.
         </p>
 
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground bg-muted/35 rounded-xl py-2">

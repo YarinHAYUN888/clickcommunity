@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { User, Edit3, LogOut, Loader2, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getMyProfile, getProfileStats } from '@/services/profile';
 import { motion } from 'framer-motion';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
+import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
 
 interface ProfileStats {
   events_attended: number;
@@ -68,6 +69,10 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function isUuid(s: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+}
+
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { userId: paramUserId } = useParams();
@@ -92,6 +97,10 @@ export default function ProfilePage() {
           }
           return;
         }
+        if (paramUserId === 'edit' || (paramUserId && !isUuid(paramUserId))) {
+          if (mounted) setLoading(false);
+          return;
+        }
         const uid = paramUserId || session.user.id;
 
         const profileData = await getMyProfile(uid);
@@ -104,7 +113,11 @@ export default function ProfilePage() {
           return;
         }
 
-        setProfile(profileData);
+        setProfile({
+          ...profileData,
+          photos: normalizePhotoUrls(profileData.photos) as typeof profileData.photos,
+          interests: normalizeInterestLabels(profileData.interests) as typeof profileData.interests,
+        });
         setLoading(false);
 
         getProfileStats(uid)
@@ -125,6 +138,13 @@ export default function ProfilePage() {
       mounted = false;
     };
   }, [paramUserId]);
+
+  if (paramUserId === 'edit') {
+    return <Navigate to="/profile/edit" replace />;
+  }
+  if (paramUserId && !isUuid(paramUserId)) {
+    return <Navigate to="/profile" replace />;
+  }
 
   if (noSession) {
     return (
@@ -157,11 +177,20 @@ export default function ProfilePage() {
     );
   }
 
-  const photos = profile?.photos?.length ? profile.photos : (profile?.avatar_url ? [profile.avatar_url] : []);
-  const age = profile?.date_of_birth
-    ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / 31557600000)
-    : null;
-  const completion = stats?.profile_completion ?? profile?.profile_completion ?? 0;
+  const rawPhotos = normalizePhotoUrls(profile?.photos);
+  const photos =
+    rawPhotos.length > 0 ? rawPhotos : profile?.avatar_url ? [profile.avatar_url] : [];
+  const displayInterests = normalizeInterestLabels(profile?.interests);
+  const age =
+    profile?.date_of_birth && Number.isFinite(new Date(profile.date_of_birth).getTime())
+      ? Math.floor(
+          (Date.now() - new Date(profile.date_of_birth).getTime()) / 31557600000,
+        )
+      : null;
+  const rawCompletion = stats?.profile_completion ?? profile?.profile_completion ?? 0;
+  const completion = Number.isFinite(Number(rawCompletion))
+    ? Math.min(100, Math.max(0, Number(rawCompletion)))
+    : 0;
 
   return (
     <div className="min-h-screen gradient-bg pb-24">
@@ -274,9 +303,9 @@ export default function ProfilePage() {
         {/* Interests */}
         <GlassCard variant="strong" className="p-4">
           <h2 className="font-bold text-foreground mb-2 text-sm">תחומי עניין</h2>
-          {profile?.interests && profile.interests.length > 0 ? (
+          {displayInterests.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {profile.interests.map((i: string) => (
+              {displayInterests.map((i: string) => (
                 <InterestPill key={i} label={i} emoji={getInterestEmoji(i)} size="sm" />
               ))}
             </div>

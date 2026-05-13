@@ -9,6 +9,9 @@ import { getMyProfile, updateProfile, uploadProfilePhoto, deleteProfilePhoto } f
 import { allInterests } from '@/data/demo';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
+import { getPostAuthRouteFromProfile } from '@/lib/routing/postAuthRedirect';
+import { notifyProfileUpdated, type SupabaseProfile } from '@/hooks/useCurrentUser';
 
 export default function EditProfilePage() {
   const navigate = useNavigate();
@@ -33,7 +36,11 @@ export default function EditProfilePage() {
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) { navigate('/welcome'); return; }
+      if (!session?.user) {
+        setLoading(false);
+        navigate('/welcome');
+        return;
+      }
       setAuthId(session.user.id);
       try {
         const p = await getMyProfile(session.user.id);
@@ -42,21 +49,39 @@ export default function EditProfilePage() {
           setLoading(false);
           return;
         }
+        const nextRoute = getPostAuthRouteFromProfile(p as unknown as SupabaseProfile);
+        if (nextRoute === '/clicks') {
+          navigate('/clicks', { replace: true });
+          return;
+        }
+        if (nextRoute === '/pending-review') {
+          navigate('/pending-review', { replace: true });
+          return;
+        }
+        if (nextRoute === '/blocked') {
+          navigate('/blocked', { replace: true });
+          return;
+        }
+        const photoList = normalizePhotoUrls(p.photos);
+        const interestList = normalizeInterestLabels(p.interests);
         setFirstName(p.first_name || '');
         setOccupation(p.occupation || '');
         setBio(p.bio || '');
-        setPhotos(p.photos || []);
-        setInterests(p.interests || []);
+        setPhotos(photoList);
+        setInterests(interestList);
         setDob(p.date_of_birth || '');
         setGender(p.gender || '');
         setOriginal({
           first_name: p.first_name || '',
           occupation: p.occupation || '',
           bio: p.bio || '',
-          photos: p.photos || [],
-          interests: p.interests || [],
+          photos: photoList,
+          interests: interestList,
         });
-      } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error(e);
+        toast.error('לא ניתן לטעון את הפרופיל');
+      }
       setLoading(false);
     })();
   }, [navigate]);
@@ -72,9 +97,12 @@ export default function EditProfilePage() {
     );
   }, [firstName, occupation, bio, photos, interests, original]);
 
-  const age = dob
-    ? Math.floor((Date.now() - new Date(dob).getTime()) / 31557600000)
-    : null;
+  const age = (() => {
+    if (!dob) return null;
+    const t = new Date(dob).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.floor((Date.now() - t) / 31557600000);
+  })();
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -121,6 +149,7 @@ export default function EditProfilePage() {
         photos,
         interests,
       });
+      notifyProfileUpdated(authId);
       toast.success('הפרופיל עודכן!');
       navigate('/profile');
     } catch (e: any) {

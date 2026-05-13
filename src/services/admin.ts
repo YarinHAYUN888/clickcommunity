@@ -69,12 +69,21 @@ export async function updateProfileSuitability(
     moderation_reason?: string | null;
     moderation_reviewed_at?: string | null;
     moderation_reviewed_by?: string | null;
+    profile_completed?: boolean;
+    image_upload_status?: 'pending' | 'success' | 'failed';
   },
 ) {
   let updatePayload: Record<string, unknown> = {
     suitability_status: payload.suitability_status,
     is_shadow: payload.is_shadow,
   };
+
+  if (payload.profile_completed !== undefined) {
+    updatePayload.profile_completed = payload.profile_completed;
+  }
+  if (payload.image_upload_status !== undefined) {
+    updatePayload.image_upload_status = payload.image_upload_status;
+  }
 
   if (payload.moderation_status !== undefined) {
     updatePayload.moderation_status = payload.moderation_status;

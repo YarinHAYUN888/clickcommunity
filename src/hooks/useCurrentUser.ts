@@ -1,6 +1,19 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+const profileListeners = new Set<(userId: string) => void>();
+
+/** Call after server-side profile changes (e.g. admin approval) so all `useCurrentUser` instances refetch. */
+export function notifyProfileUpdated(userId: string) {
+  profileListeners.forEach((fn) => {
+    try {
+      fn(userId);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 export interface SupabaseProfile {
   id: string;
   user_id: string;
@@ -134,6 +147,55 @@ export function useCurrentUser(): CurrentUser {
       subscription.unsubscribe();
     };
   }, []);
+
+  // When admin (or triggers) updates `profiles`, refetch so gates and tabs stay in sync.
+  useEffect(() => {
+    if (!authId) return;
+
+    const pull = () => {
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', authId)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (!mountedRef.current || error) return;
+          setProfile((data as SupabaseProfile) ?? null);
+        });
+    };
+
+    const onExternalUpdate = (userId: string) => {
+      if (userId === authId) pull();
+    };
+    profileListeners.add(onExternalUpdate);
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel(`profiles-self-${authId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles', filter: `user_id=eq.${authId}` },
+          () => {
+            pull();
+          },
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('[useCurrentUser] profile realtime subscribe failed:', e);
+    }
+
+    return () => {
+      profileListeners.delete(onExternalUpdate);
+      if (channel) {
+        try {
+          void supabase.removeChannel(channel);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [authId]);
 
   return {
     authId: authId || '',

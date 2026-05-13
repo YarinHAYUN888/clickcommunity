@@ -49,9 +49,36 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
-    return new Response(JSON.stringify({ success: true, user: data, profile_completion: data.profile_completion }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const row = data as Record<string, unknown>;
+    const photosList = Array.isArray(row.photos) ? (row.photos as unknown[]) : [];
+    const hasPhoto =
+      photosList.some((u) => typeof u === "string" && u.trim().length > 0) ||
+      (typeof row.avatar_url === "string" && row.avatar_url.trim().length > 0);
+    const fn = typeof row.first_name === "string" ? row.first_name.trim() : "";
+    const fnOk = fn.length >= 2;
+    const interestsList = Array.isArray(row.interests) ? (row.interests as unknown[]) : [];
+    const interestsOk = interestsList.length === 0 || interestsList.length >= 5;
+
+    let finalData = data;
+    if (hasPhoto && fnOk && interestsOk) {
+      const { data: data2, error: flagsErr } = await supabase
+        .from("profiles")
+        .update({
+          profile_completed: true,
+          image_upload_status: "success",
+        })
+        .eq("user_id", user_id)
+        .select("*")
+        .single();
+      if (!flagsErr && data2) finalData = data2;
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, user: finalData, profile_completion: finalData.profile_completion }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
