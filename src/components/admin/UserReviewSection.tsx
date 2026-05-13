@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { updateProfileSuitability } from '@/services/admin';
 import type { Database } from '@/integrations/supabase/types';
 import { formatQuestionnaireForAdmin } from '@/data/introductionQuestionnaire';
+import { VoiceIntroReviewPlayer } from '@/components/admin/VoiceIntroReviewPlayer';
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 
@@ -176,6 +177,15 @@ export function UserReviewSection() {
                         <p className="text-xs text-muted-foreground line-clamp-3">
                           {(r.interests || []).join(', ') || 'אין תחומי עניין'}
                         </p>
+                        {r.voice_intro_url && (
+                          <div className="text-xs bg-muted/30 rounded-xl p-3 space-y-2 text-right border border-border/50">
+                            <p className="font-semibold text-foreground">הקדמה קולית</p>
+                            <VoiceIntroReviewPlayer
+                              objectPath={r.voice_intro_url}
+                              durationSeconds={r.voice_intro_duration}
+                            />
+                          </div>
+                        )}
                         {questionnaireRows.some((row) => row.answer !== '—') && (
                           <div className="text-xs bg-muted/30 rounded-xl p-3 space-y-2 text-right border border-border/50">
                             <p className="font-semibold text-foreground">שאלון היכרות</p>

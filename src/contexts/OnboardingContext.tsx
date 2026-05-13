@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
+
+/** In-memory only — holds recorded voice blob until post-auth upload (never persisted to localStorage). */
+export type VoiceIntroDraft = {
+  blob: Blob;
+  durationSec: number;
+  mimeType: string;
+} | null;
 
 export interface OnboardingData {
   phone: string;
@@ -51,11 +58,14 @@ interface OnboardingContextType {
   data: OnboardingData;
   updateData: (partial: Partial<OnboardingData>) => void;
   clearData: () => void;
+  voiceIntroDraftRef: MutableRefObject<VoiceIntroDraft>;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | null>(null);
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
+  const voiceIntroDraftRef = useRef<VoiceIntroDraft>(null);
+
   const [data, setData] = useState<OnboardingData>(() => {
     let refFromStore = '';
     try {
@@ -97,24 +107,35 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       // Don't persist password to localStorage
       const { password, ...safe } = data;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
-    } catch {}
+    } catch {
+      /* ignore localStorage */
+    }
   }, [data]);
 
   const updateData = (partial: Partial<OnboardingData>) => {
     if (partial.password !== undefined) {
-      try { sessionStorage.setItem(PWD_SESSION_KEY, partial.password); } catch {}
+      try {
+        sessionStorage.setItem(PWD_SESSION_KEY, partial.password);
+      } catch {
+        /* ignore sessionStorage */
+      }
     }
     setData(prev => ({ ...prev, ...partial }));
   };
 
   const clearData = () => {
+    voiceIntroDraftRef.current = null;
     setData(defaultData);
     localStorage.removeItem(STORAGE_KEY);
-    try { sessionStorage.removeItem(PWD_SESSION_KEY); } catch {}
+    try {
+      sessionStorage.removeItem(PWD_SESSION_KEY);
+    } catch {
+      /* ignore sessionStorage */
+    }
   };
 
   return (
-    <OnboardingContext.Provider value={{ data, updateData, clearData }}>
+    <OnboardingContext.Provider value={{ data, updateData, clearData, voiceIntroDraftRef }}>
       {children}
     </OnboardingContext.Provider>
   );

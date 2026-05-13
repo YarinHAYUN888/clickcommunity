@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, UserCheck, Calendar, MessageCircle, CreditCard, ChevronLeft } from 'lucide-react';
+import { Users, UserCheck, Calendar, MessageCircle, CreditCard, ChevronLeft, Workflow } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
@@ -37,6 +37,7 @@ const navCards = [
   { icon: Calendar, label: 'ניהול אירועים', route: '/admin/events' },
   { icon: MessageCircle, label: 'ניהול צ׳אטים', route: '/admin/chats' },
   { icon: CreditCard, label: 'ניהול מנויים', route: '/admin/subscriptions' },
+  { icon: Workflow, label: 'אוטומציות', route: '/admin/automation' },
 ];
 
 function getNestedValue(obj: any, path: string): number {

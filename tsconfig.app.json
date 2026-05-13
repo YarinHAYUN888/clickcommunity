@@ -19,6 +19,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@emailTransactional": [
+        "./supabase/functions/_shared/emailTransactionalHtml.ts"
       ]
     },
     "skipLibCheck": true,

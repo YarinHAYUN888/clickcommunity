@@ -44,6 +44,144 @@ export type Database = {
         }
         Relationships: []
       }
+      automation_flows: {
+        Row: {
+          actions: Json
+          conditions: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          name: string
+          template_id: string | null
+          trigger_type: string
+          updated_at: string
+        }
+        Insert: {
+          actions?: Json
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          template_id?: string | null
+          trigger_type: string
+          updated_at?: string
+        }
+        Update: {
+          actions?: Json
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          template_id?: string | null
+          trigger_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      automation_logs: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          flow_id: string | null
+          id: string
+          manual_test_email: string | null
+          payload: Json
+          recipient_mode: string | null
+          recipient_user_id: string | null
+          resolution_meta: Json
+          segment_key: string | null
+          sent_by: string | null
+          status: string
+          template_id: string | null
+          trigger_type: string | null
+          webhook_mode: string | null
+          webhook_url_type: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          flow_id?: string | null
+          id?: string
+          manual_test_email?: string | null
+          payload?: Json
+          recipient_mode?: string | null
+          recipient_user_id?: string | null
+          resolution_meta?: Json
+          segment_key?: string | null
+          sent_by?: string | null
+          status?: string
+          template_id?: string | null
+          trigger_type?: string | null
+          webhook_mode?: string | null
+          webhook_url_type?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          flow_id?: string | null
+          id?: string
+          manual_test_email?: string | null
+          payload?: Json
+          recipient_mode?: string | null
+          recipient_user_id?: string | null
+          resolution_meta?: Json
+          segment_key?: string | null
+          sent_by?: string | null
+          status?: string
+          template_id?: string | null
+          trigger_type?: string | null
+          webhook_mode?: string | null
+          webhook_url_type?: string | null
+        }
+        Relationships: []
+      }
+      automation_templates: {
+        Row: {
+          body: string
+          builder_document: Json | null
+          category: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_system: boolean
+          name: string
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          builder_document?: Json | null
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_system?: boolean
+          name: string
+          status?: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          builder_document?: Json | null
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_system?: boolean
+          name?: string
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       announcements: {
         Row: {
           admin_id: string
@@ -562,6 +700,10 @@ export type Database = {
           tiktok: string | null
           updated_at: string
           user_id: string
+          voice_intro_duration: number | null
+          voice_intro_meta: Json
+          voice_intro_status: string | null
+          voice_intro_url: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -607,6 +749,10 @@ export type Database = {
           tiktok?: string | null
           updated_at?: string
           user_id: string
+          voice_intro_duration?: number | null
+          voice_intro_meta?: Json
+          voice_intro_status?: string | null
+          voice_intro_url?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -652,6 +798,10 @@ export type Database = {
           tiktok?: string | null
           updated_at?: string
           user_id?: string
+          voice_intro_duration?: number | null
+          voice_intro_meta?: Json
+          voice_intro_status?: string | null
+          voice_intro_url?: string | null
         }
         Relationships: []
       }

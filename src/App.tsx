@@ -33,6 +33,7 @@ import AdminEventParticipantsPage from "./pages/admin/AdminEventParticipantsPage
 import AdminEventFormPage from "./pages/admin/AdminEventFormPage";
 import AdminChatsPage from "./pages/admin/AdminChatsPage";
 import AdminSubscriptionsPage from "./pages/admin/AdminSubscriptionsPage";
+import AdminAutomationPage from "./pages/admin/AdminAutomationPage";
 import PendingReviewPage from "./pages/PendingReviewPage";
 import BlockedPage from "./pages/BlockedPage";
 import SuitabilityGate from "@/components/guards/SuitabilityGate";
@@ -88,6 +89,7 @@ const App = () => (
                     <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
                     <Route path="/admin/chats" element={<AdminChatsPage />} />
                     <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
+                    <Route path="/admin/automation" element={<AdminAutomationPage />} />
                   </Route>
                 </Route>
 

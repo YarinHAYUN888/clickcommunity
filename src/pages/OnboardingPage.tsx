@@ -21,6 +21,7 @@ import {
 import { invokeCompleteRegistration } from '@/services/completeRegistration';
 import { runUserAnalysis } from '@/services/userSuitability';
 import { uploadOnboardingPhotosFromDataUrls } from '@/services/profile';
+import { uploadVoiceIntroAfterProfile } from '@/services/voiceIntroUpload';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
 type Step = typeof steps[number];
@@ -842,6 +843,7 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 
 // ---- STEP 6: Verify ----
 function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: any; onComplete: () => void }) {
+  const { voiceIntroDraftRef } = useOnboarding();
   const [method, setMethod] = useState<'phone' | 'email'>(data.verificationMethod || '');
   const [codeSent, setCodeSent] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -928,6 +930,9 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       console.info('[onboarding] photo upload start', { userId: uid, photoCount: data.photos?.length || 0 });
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
       await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
+      console.info('[onboarding] auth_and_profile_ok_voice_upload', { userId: uid });
+      await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
+      voiceIntroDraftRef.current = null;
       try {
         await runUserAnalysis(
           {
@@ -976,7 +981,7 @@ function VerifyStep({ data, updateData, onComplete }: { data: any; updateData: a
       console.warn('claim-signup-rewards:', e);
     }
     return { profileSyncFailed };
-  }, [data]);
+  }, [data, voiceIntroDraftRef]);
 
   const handleSendCode = useCallback(async () => {
     if (!method) return;

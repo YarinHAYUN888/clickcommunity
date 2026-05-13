@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { OnboardingData } from '@/contexts/OnboardingContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
+import { VoiceIntroductionCard } from '@/components/onboarding/VoiceIntroductionCard';
+import { VOICE_INTRO_MIN_SEC, VOICE_INTRO_MAX_SEC } from '@/services/voiceIntroRecording';
 import {
   INTRODUCTION_QUESTIONS,
   emptyQuestionnaireState,
@@ -17,6 +20,8 @@ export function IntroductionQuestionnaireStep({
   updateData: (p: Partial<OnboardingData>) => void;
   onNext: () => void;
 }) {
+  const { voiceIntroDraftRef } = useOnboarding();
+
   const responses = useMemo(
     () => ({ ...emptyQuestionnaireState(), ...(data.questionnaireResponses || {}) }),
     [data.questionnaireResponses],
@@ -35,6 +40,13 @@ export function IntroductionQuestionnaireStep({
 
   function handleNext() {
     setTouched(true);
+    const draft = voiceIntroDraftRef.current;
+    if (draft) {
+      const d = draft.durationSec;
+      if (d < VOICE_INTRO_MIN_SEC || d > VOICE_INTRO_MAX_SEC + 0.5) {
+        return;
+      }
+    }
     const { ok } = validateQuestionnaire(responses);
     if (!ok) return;
     onNext();
@@ -50,6 +62,8 @@ export function IntroductionQuestionnaireStep({
           כמה שאלות פתוחות כדי שנכיר אתכם טוב יותר. התשובות נשמרות בפרופיל ומשמשות גם לבדיקת התאמה איכותית.
         </p>
       </div>
+
+      <VoiceIntroductionCard />
 
       <div className="space-y-6">
         {INTRODUCTION_QUESTIONS.map((q, index) => (
