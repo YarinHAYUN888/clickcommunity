@@ -48,7 +48,7 @@ export default function LoginPage() {
       const { route, profile } = await resolvePostAuthRedirect(uid);
       console.log("Loaded profile after login:", profile);
       console.log("Redirecting after login:", route);
-      if (route === '/clicks') notifyProfileUpdated(uid);
+      if (route === '/clicks' || route === '/pending-review') notifyProfileUpdated(uid);
       navigate(route, { replace: true });
     } catch (e) {
       console.error('Login exception:', e);

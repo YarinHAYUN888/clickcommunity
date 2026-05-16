@@ -6,7 +6,7 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, downloadIcs, EventStats, EventRegistration } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -31,6 +31,8 @@ export default function EventDetailPage() {
   const [attendeesModalOpen, setAttendeesModalOpen] = useState(false);
   const [pendingDmFor, setPendingDmFor] = useState<string | null>(null);
 
+  const [monthlyUsage, setMonthlyUsage] = useState<{ used: number; cap: number } | null>(null);
+
   useEffect(() => {
     if (!eventId) return;
     Promise.all([
@@ -48,6 +50,14 @@ export default function EventDetailPage() {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [eventId, authId]);
+
+  useEffect(() => {
+    if (role !== 'member' || !authId) {
+      setMonthlyUsage(null);
+      return;
+    }
+    void getMyMonthlyEventRegistrationUsage().then(setMonthlyUsage);
+  }, [role, authId, registration?.status]);
 
   // Countdown
   useEffect(() => {
@@ -70,13 +80,25 @@ export default function EventDetailPage() {
   const handleRegister = async () => {
     if (!eventId || !authId) return;
     if (role === 'guest') {
-      sonner('Registration is available for members only', { icon: '🔒' });
+      sonner('ההרשמה לאירועים לחברי קהילה', {
+        description: 'עברו למנוי כדי להירשם עד 3 אירועים בחודש וליהנות מכל התכונות.',
+        duration: 6000,
+      });
+      return;
+    }
+    if (monthlyUsage && monthlyUsage.used >= monthlyUsage.cap && !isRegistered) {
+      sonner.error(`הגעת למכסה החודשית (${monthlyUsage.cap} אירועים). החודש הבא תוכלו להירשם שוב.`);
       return;
     }
     setRegistering(true);
     try {
-      const result = await registerForEvent(eventId);
-      if (result.success) {
+      const result = await registerForEvent(eventId) as {
+        success?: boolean;
+        registration_status?: string;
+        waitlist_position?: number | null;
+        entry_code?: string | null;
+      };
+      if (result?.success) {
         setRegistration({
           id: '',
           event_id: eventId,
@@ -90,9 +112,14 @@ export default function EventDetailPage() {
         });
         if (result.registration_status === 'registered') setShowSuccess(true);
         else toast({ title: `ברשימת המתנה (מקום ${result.waitlist_position})` });
+        void getMyMonthlyEventRegistrationUsage().then(setMonthlyUsage);
       }
-    } catch (err: any) {
-      toast({ title: 'שגיאה', description: err.message || 'נסו שוב', variant: 'destructive' });
+    } catch (err: unknown) {
+      if (err instanceof MonthlyEventLimitError) {
+        sonner.error(`ניצלת את מכסת האירועים לחודש (${err.cap}). נסו שוב בחודש הבא.`);
+      } else {
+        toast({ title: 'שגיאה', description: err instanceof Error ? err.message : 'נסו שוב', variant: 'destructive' });
+      }
     }
     setRegistering(false);
   };
@@ -424,7 +451,12 @@ export default function EventDetailPage() {
       {/* Sticky CTA */}
       {!isPast && (
         <div className="fixed bottom-20 inset-x-0 z-30 px-6 pb-2 pt-4 bg-gradient-to-t from-background to-transparent">
-          <div className="max-w-[640px] mx-auto">
+          <div className="max-w-[640px] mx-auto space-y-2">
+            {monthlyUsage && role === 'member' && !isPast && (
+              <p className="text-center text-[12px] text-muted-foreground">
+                הרשמות לאירועים החודש: {monthlyUsage.used}/{monthlyUsage.cap} (לפי לוח שנה בישראל)
+              </p>
+            )}
             {isRegistered ? (
               <button className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-success/20 text-success" disabled>
                 רשום/ה ✓
@@ -435,8 +467,17 @@ export default function EventDetailPage() {
               </button>
             ) : (
               <button
-                onClick={handleRegister}
-                disabled={registering || !authId}
+                onClick={role === 'guest' ? () => navigate('/subscription') : handleRegister}
+                disabled={
+                  registering ||
+                  !authId ||
+                  (!!monthlyUsage && monthlyUsage.used >= monthlyUsage.cap && !isRegistered && registration?.status !== 'waitlist')
+                }
+                title={
+                  monthlyUsage && monthlyUsage.used >= monthlyUsage.cap && !isRegistered
+                    ? `מכסה חודשית: ${monthlyUsage.used}/${monthlyUsage.cap}`
+                    : undefined
+                }
                 className="w-full rounded-[999px] gradient-primary text-primary-foreground py-3.5 font-semibold text-base active:scale-[0.97] transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {!canRegister ? (

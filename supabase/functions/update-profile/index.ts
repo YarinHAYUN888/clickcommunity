@@ -9,7 +9,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { user_id, first_name, occupation, bio, photos, interests } = await req.json();
+    const { user_id, first_name, occupation, bio, photos, interests, life_niche } = await req.json();
     if (!user_id) return new Response(JSON.stringify({ error: "user_id required" }), { status: 400, headers: corsHeaders });
 
     const supabase = createClient(
@@ -25,6 +25,14 @@ Deno.serve(async (req) => {
       updates.first_name = first_name;
     }
     if (occupation !== undefined) updates.occupation = occupation;
+    if (life_niche !== undefined) {
+      const allowed = new Set(["soldier_post_service", "post_big_trip", "student", "first_job"]);
+      const n = typeof life_niche === "string" ? life_niche.trim() : "";
+      if (n.length > 0 && !allowed.has(n)) {
+        return new Response(JSON.stringify({ error: "invalid life_niche" }), { status: 400, headers: corsHeaders });
+      }
+      updates.life_niche = n.length > 0 ? n : null;
+    }
     if (bio !== undefined) {
       if (typeof bio === "string" && bio.length > 300)
         return new Response(JSON.stringify({ error: "bio max 300 chars" }), { status: 400, headers: corsHeaders });

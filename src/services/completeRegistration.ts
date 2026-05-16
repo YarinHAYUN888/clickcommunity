@@ -12,6 +12,8 @@ export interface CompleteRegistrationProfilePayload {
   region?: string;
   regionOther?: string;
   occupation?: string;
+  /** Same values as profiles.life_niche check constraint */
+  lifeNiche?: string;
   bio?: string;
   instagram?: string;
   tiktok?: string;

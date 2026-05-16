@@ -321,10 +321,10 @@ export function VoiceIntroductionCard() {
             ספר/י לנו קצת על עצמך בקול 🎙️
           </h3>
           <p className="text-[13px] md:text-sm text-muted-foreground leading-relaxed">
-            ספר/י מי את/ה, למה תרצה/י להצטרף לקהילה ומה מחפש/ת כאן
+            הקלטה קולית בלבד (לא וידאו) — ספר/י מי את/ה, למה תרצה/י להצטרף לקהילה ומה מחפש/ת כאן
           </p>
-          <p className="text-[11px] text-muted-foreground/80">
-            {VOICE_INTRO_MIN_SEC}–{VOICE_INTRO_MAX_SEC} שניות · אופציונלי
+          <p className="text-[11px] text-muted-foreground/90 font-medium">
+            אורך נדרש: {VOICE_INTRO_MIN_SEC} שניות עד {formatClock(VOICE_INTRO_MAX_SEC)} (דקה וחצי לכל היותר) · אופציונלי
           </p>
         </div>
 
@@ -398,16 +398,23 @@ export function VoiceIntroductionCard() {
                 width={600}
                 height={64}
               />
-              <div className="flex justify-center">
+              <div className="flex justify-center flex-col items-center gap-2">
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.95 }}
                   onClick={stopRecording}
-                  className="flex items-center gap-2 rounded-full bg-destructive px-6 py-2.5 text-sm font-semibold text-destructive-foreground"
+                  disabled={elapsedSec < VOICE_INTRO_MIN_SEC}
+                  className="flex items-center gap-2 rounded-full bg-destructive px-6 py-2.5 text-sm font-semibold text-destructive-foreground disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <Square className="h-4 w-4 fill-current" />
                   עצור
                 </motion.button>
+                {elapsedSec < VOICE_INTRO_MIN_SEC && (
+                  <p className="text-[11px] text-muted-foreground text-center max-w-[280px]">
+                    אפשר לעצור אחרי {VOICE_INTRO_MIN_SEC} שניות (נשארו עוד{' '}
+                    {Math.max(0, Math.ceil(VOICE_INTRO_MIN_SEC - elapsedSec))})
+                  </p>
+                )}
               </div>
             </motion.div>
           )}

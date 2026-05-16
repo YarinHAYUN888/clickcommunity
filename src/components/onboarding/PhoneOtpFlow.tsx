@@ -21,6 +21,23 @@ export default function PhoneOtpFlow({ onVerified, initialPhone = '', showDevByp
   const [devLoading, setDevLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  useEffect(() => {
+    const cleaned = (initialPhone || '').replace(/[-\s]/g, '').replace(/^0/, '');
+    if (cleaned) setPhone(cleaned);
+  }, [initialPhone]);
+
+  useEffect(() => {
+    try {
+      const b = sessionStorage.getItem('clicks_onboarding_phone_backup') || '';
+      const cleaned = b.replace(/[-\s]/g, '').replace(/^0/, '');
+      if (cleaned && /^5\d{8}$/.test(cleaned)) {
+        setPhone((prev) => (prev.replace(/\D/g, '').length >= 8 ? prev : cleaned));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const isValidPhone = /^5\d{8}$/.test(phone.replace(/[-\s]/g, '').replace(/^0/, ''));
 
   useEffect(() => {

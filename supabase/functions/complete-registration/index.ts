@@ -68,6 +68,15 @@ function buildProfilesUpsertRow(
   const occ = normalizeString(p.occupation);
   if (occ) row.occupation = occ;
 
+  const niche = normalizeString(p.lifeNiche);
+  const allowedNiche = new Set([
+    "soldier_post_service",
+    "post_big_trip",
+    "student",
+    "first_job",
+  ]);
+  if (niche && allowedNiche.has(niche)) row.life_niche = niche;
+
   if (typeof p.bio === "string") {
     row.bio = p.bio.trim() || null;
   }

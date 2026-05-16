@@ -24,6 +24,11 @@ export interface SupabaseProfile {
   gender: string | null;
   photos: string[] | null;
   occupation: string | null;
+  /** Persona key for feed matching (see LIFE_NICHE_OPTIONS) */
+  life_niche?: string | null;
+  /** Distinct community vouches where this user is target (DB trigger maintained) */
+  community_vouch_count?: number | null;
+  region?: string | null;
   bio: string | null;
   interests: string[] | null;
   avatar_url: string | null;
@@ -86,6 +91,11 @@ export function useCurrentUser(): CurrentUser {
                   user_id: userId,
                   first_name: firstName || null,
                   last_name: lastName || null,
+                  moderation_status: 'pending',
+                  suitability_status: 'active',
+                  is_shadow: false,
+                  profile_completed: false,
+                  image_upload_status: 'pending',
                 },
                 { onConflict: 'user_id' }
               );

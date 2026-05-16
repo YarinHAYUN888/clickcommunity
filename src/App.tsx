@@ -34,6 +34,7 @@ import AdminEventFormPage from "./pages/admin/AdminEventFormPage";
 import AdminChatsPage from "./pages/admin/AdminChatsPage";
 import AdminSubscriptionsPage from "./pages/admin/AdminSubscriptionsPage";
 import AdminAutomationPage from "./pages/admin/AdminAutomationPage";
+import AdminCommunityPage from "./pages/admin/AdminCommunityPage";
 import PendingReviewPage from "./pages/PendingReviewPage";
 import BlockedPage from "./pages/BlockedPage";
 import CompleteProfilePage from "./pages/CompleteProfilePage";
@@ -93,6 +94,7 @@ const App = () => (
                     <Route path="/admin/chats" element={<AdminChatsPage />} />
                     <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
                     <Route path="/admin/automation" element={<AdminAutomationPage />} />
+                    <Route path="/admin/community" element={<AdminCommunityPage />} />
                   </Route>
                 </Route>
 

@@ -1,5 +1,71 @@
 import { supabase } from '@/integrations/supabase/client';
 
+const HEIC_MIME = new Set(['image/heic', 'image/heif', 'image/heif-sequence', 'image/heic-sequence']);
+
+function looksLikeHeic(file: File | Blob, nameHint = ''): boolean {
+  const t = (file.type || '').toLowerCase();
+  if (HEIC_MIME.has(t)) return true;
+  return /\.(heic|heif)$/i.test(nameHint);
+}
+
+/** Convert HEIC/HEIF to JPEG for browsers that cannot upload HEIC to storage as-is (e.g. iPhone Safari). */
+async function heicLikeToJpegFile(blob: Blob, index: number): Promise<File> {
+  const heic2any = (await import('heic2any')).default;
+  const converted = await heic2any({ blob, toType: 'image/jpeg', quality: 0.88 });
+  const outBlob = Array.isArray(converted) ? converted[0] : converted;
+  return new File([outBlob], `onboarding-${index}.jpeg`, { type: 'image/jpeg' });
+}
+
+/** Downscale large JPEG/PNG/WebP for faster upload and stable storage. */
+async function downscaleImageFileIfLarge(file: File, maxDim = 1920, quality = 0.86): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') return file;
+  if (file.size < 750_000) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const w = bmp.width;
+    const h = bmp.height;
+    if (w <= maxDim && h <= maxDim) {
+      bmp.close();
+      return file;
+    }
+    const scale = Math.min(maxDim / w, maxDim / h, 1);
+    const nw = Math.max(1, Math.round(w * scale));
+    const nh = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = nw;
+    canvas.height = nh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bmp.close();
+      return file;
+    }
+    ctx.drawImage(bmp, 0, 0, nw, nh);
+    bmp.close();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', quality),
+    );
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '-opt.jpg', { type: 'image/jpeg' });
+  } catch (e) {
+    console.warn('[downscaleImageFileIfLarge] skipped', e);
+    return file;
+  }
+}
+
+/** Normalize to a JPEG-ish File safe for Supabase Storage + mobile Safari. */
+export async function prepareImageFileForUpload(file: File, index: number): Promise<File> {
+  let f = file;
+  if (looksLikeHeic(f, f.name)) {
+    try {
+      f = await heicLikeToJpegFile(f, index);
+    } catch (e) {
+      console.error('[prepareImageFileForUpload] HEIC conversion failed', e);
+      throw e;
+    }
+  }
+  return downscaleImageFileIfLarge(f);
+}
+
 export async function getMyProfile(userId: string) {
   let { data, error } = await supabase
     .from('profiles')
@@ -13,7 +79,17 @@ export async function getMyProfile(userId: string) {
   if (!data) {
     const { error: upsertErr } = await supabase
       .from('profiles')
-      .upsert({ user_id: userId }, { onConflict: 'user_id' });
+      .upsert(
+        {
+          user_id: userId,
+          moderation_status: 'pending',
+          suitability_status: 'active',
+          is_shadow: false,
+          profile_completed: false,
+          image_upload_status: 'pending',
+        },
+        { onConflict: 'user_id' },
+      );
     if (!upsertErr) {
       const again = await supabase
         .from('profiles')
@@ -39,6 +115,7 @@ export async function getUserProfile(userId: string) {
 export async function updateProfile(userId: string, updates: {
   first_name?: string;
   occupation?: string;
+  life_niche?: string | null;
   bio?: string;
   photos?: string[];
   interests?: string[];
@@ -102,12 +179,17 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
     const s = sources[i];
     if (!s) continue;
     if (s.startsWith('data:') || s.startsWith('blob:')) {
-      const res = await fetch(s);
-      const blob = await res.blob();
-      const mime = blob.type || 'image/jpeg';
-      const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
-      const file = new File([blob], `onboarding-${i}.${sub}`, { type: mime });
-      out.push(await uploadProfilePhoto(userId, file, i));
+      try {
+        const res = await fetch(s);
+        const blob = await res.blob();
+        const mime = blob.type || 'image/jpeg';
+        const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
+        const rawFile = new File([blob], `onboarding-${i}.${sub}`, { type: mime });
+        const file = await prepareImageFileForUpload(rawFile, i);
+        out.push(await uploadProfilePhoto(userId, file, i));
+      } catch (e) {
+        console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed (continuing)', { userId, index: i, e });
+      }
       continue;
     }
     const isProjectPublic =
@@ -119,7 +201,7 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
     }
     out.push(s);
   }
-  console.info('[uploadOnboardingPhotosFromDataUrls] success', { userId, uploadedCount: out.length });
+  console.info('[uploadOnboardingPhotosFromDataUrls] done', { userId, uploadedCount: out.length });
   return out;
 }
 
@@ -128,7 +210,7 @@ export async function uploadProfilePhoto(userId: string, file: File, index: numb
   if (!file.type.startsWith('image/')) {
     throw new Error('invalid_image_type');
   }
-  if (file.size < 800) {
+  if (file.size < 400) {
     throw new Error('image_too_small');
   }
   const fileExt = file.name.split('.').pop();

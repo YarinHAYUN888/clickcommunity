@@ -1,4 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
+import { countRowsInCurrentJerusalemMonth } from '@/lib/jerusalemMonth';
+
+const DEFAULT_MONTHLY_EVENT_CAP = 3;
 
 export interface EventRow {
   id: string;
@@ -267,7 +270,9 @@ export async function getEventClicks(
       .single(),
     supabase
       .from('profiles')
-      .select('user_id, first_name, photos, avatar_url, occupation, bio, date_of_birth, interests, region')
+      .select(
+        'user_id, first_name, photos, avatar_url, occupation, bio, date_of_birth, interests, region, moderation_status',
+      )
       .in('user_id', otherIds),
   ]);
 
@@ -278,9 +283,12 @@ export async function getEventClicks(
   const myRegion = me.region || null;
 
   // 3. Compute scores
-  const scored: EventClick[] = (othersRows as EventClickProfile[])
+  const scored: EventClick[] = (othersRows as (EventClickProfile & { moderation_status?: string | null })[])
+    .filter((p) => p.moderation_status === 'approved')
     .filter(p => !!p.first_name && (p.photos?.length || p.avatar_url))
-    .map(profile => {
+    .map((row) => {
+      const full = row as EventClickProfile & { moderation_status?: string | null };
+      const { moderation_status: _m, ...profile } = full;
       const theirInterests = profile.interests || [];
       const shared = myInterests.filter(i => theirInterests.includes(i));
       const totalUnique = new Set([...myInterests, ...theirInterests]).size;
@@ -298,6 +306,56 @@ export async function getEventClicks(
     .sort((a, b) => b.compatibilityScore - a.compatibilityScore);
 
   return scored.slice(0, limit);
+}
+
+export class MonthlyEventLimitError extends Error {
+  readonly used: number;
+  readonly cap: number;
+  constructor(used: number, cap: number) {
+    super('monthly_event_limit');
+    this.name = 'MonthlyEventLimitError';
+    this.used = used;
+    this.cap = cap;
+  }
+}
+
+function extractFunctionErrorBody(data: unknown, fnError: unknown): Record<string, unknown> | null {
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+  const ctx = fnError as { context?: { body?: unknown } } | null;
+  const b = ctx?.context?.body;
+  if (b && typeof b === 'object') return b as Record<string, unknown>;
+  return null;
+}
+
+export async function getMyMonthlyEventRegistrationUsage(): Promise<{ used: number; cap: number } | null> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) return null;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('super_role, role')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+  if (profile?.super_role) {
+    return { used: 0, cap: DEFAULT_MONTHLY_EVENT_CAP };
+  }
+  if (profile?.role !== 'member') {
+    return null;
+  }
+
+  const { data: rows, error } = await supabase
+    .from('event_registrations')
+    .select('created_at')
+    .eq('user_id', session.user.id)
+    .in('status', ['registered', 'approved', 'checked_in']);
+  if (error) {
+    console.warn('getMyMonthlyEventRegistrationUsage:', error.message);
+    return { used: 0, cap: DEFAULT_MONTHLY_EVENT_CAP };
+  }
+  const used = countRowsInCurrentJerusalemMonth(rows || []);
+  return { used, cap: DEFAULT_MONTHLY_EVENT_CAP };
 }
 
 export async function getVotableAttendees(eventId: string, voterId: string) {
@@ -335,7 +393,17 @@ export async function registerForEvent(eventId: string) {
   const { data, error } = await supabase.functions.invoke('register-for-event', {
     body: { event_id: eventId },
   });
-  if (error) throw error;
+  const body = extractFunctionErrorBody(data, error);
+  if (body?.error === 'monthly_event_limit_reached') {
+    throw new MonthlyEventLimitError(Number(body.used) || 0, Number(body.cap) || DEFAULT_MONTHLY_EVENT_CAP);
+  }
+  if (error) {
+    const msg = typeof body?.message === 'string' ? body.message : error.message;
+    throw new Error(msg || 'Registration failed');
+  }
+  if (body && typeof body.error === 'string' && body.error !== undefined && !('success' in body && body.success === true)) {
+    throw new Error(String(body.message || body.error));
+  }
   return data;
 }
 

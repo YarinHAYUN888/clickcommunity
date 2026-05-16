@@ -12,6 +12,7 @@ export type ProfileRowForRedirect = Pick<
   | 'image_upload_status'
   | 'avatar_url'
   | 'photos'
+  | 'suspended'
 >;
 
 /** Human moderation cleared — even if suitability_status lags in DB */
@@ -29,14 +30,16 @@ function hasPersistedPhotos(p: ProfileRowForRedirect | SupabaseProfile | null): 
 }
 
 /**
- * Waiting for staff / AI queue. `profiles.status` is member tier (new/veteran/ambassador), NOT review — do not use it here.
+ * Human review queue: only `moderation_status = pending` (not suitability alone — avoids shadow/isolated users re-entering the queue UI).
  */
 function isPendingReview(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
   if (!p) return false;
   if (isModerationApproved(p)) return false;
-  const moderation = p.moderation_status ?? '';
-  const suitability = p.suitability_status ?? '';
-  return moderation === 'pending' || suitability === 'pending';
+  return (p.moderation_status ?? '') === 'pending';
+}
+
+function isSuspended(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
+  return p?.suspended === true;
 }
 
 function isBlockedOrRejected(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
@@ -71,7 +74,7 @@ function needsCompleteProfile(p: ProfileRowForRedirect | SupabaseProfile | null)
  */
 export function getPostAuthRouteFromProfile(profile: SupabaseProfile | ProfileRowForRedirect | null): PostAuthRoute {
   if (!profile) return '/complete-profile';
-  if (isBlockedOrRejected(profile)) return '/blocked';
+  if (isSuspended(profile) || isBlockedOrRejected(profile)) return '/blocked';
   if (isPendingReview(profile)) return '/pending-review';
   // Staff approved this user — always allow the main app (no "complete profile" trap after approval).
   if (isModerationApproved(profile)) {
@@ -90,7 +93,7 @@ export async function resolvePostAuthRedirect(
   const { data: profile, error } = await supabase
     .from('profiles')
     .select(
-      'moderation_status, suitability_status, status, profile_completed, image_upload_status, avatar_url, photos',
+      'moderation_status, suitability_status, status, profile_completed, image_upload_status, avatar_url, photos, suspended',
     )
     .eq('user_id', userId)
     .maybeSingle();

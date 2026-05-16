@@ -5,6 +5,24 @@ function generateUniqueCode() {
   return "EVT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 }
 
+function jerusalemYearMonth(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+  }).format(d);
+}
+
+function countRegsInCurrentJerusalemMonth(rows: { created_at: string }[]): number {
+  const ym = jerusalemYearMonth(new Date());
+  let n = 0;
+  for (const r of rows) {
+    if (!r?.created_at) continue;
+    if (jerusalemYearMonth(new Date(r.created_at)) === ym) n += 1;
+  }
+  return n;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -63,6 +81,34 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Registration is available for members only" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const monthlyCap = Math.max(1, Math.min(31, Number(Deno.env.get("MONTHLY_EVENT_REGISTRATION_CAP") || "3")));
+
+    if (role !== "admin") {
+      const { data: monthRegs, error: monthErr } = await supabase
+        .from("event_registrations")
+        .select("created_at")
+        .eq("user_id", user.id)
+        .in("status", ["registered", "approved", "checked_in"]);
+      if (monthErr) {
+        console.error("monthly registration count failed", monthErr);
+        return new Response(JSON.stringify({ error: "Failed to verify monthly registration limit" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const usedThisMonth = countRegsInCurrentJerusalemMonth(monthRegs || []);
+      if (usedThisMonth >= monthlyCap) {
+        return new Response(
+          JSON.stringify({
+            error: "monthly_event_limit_reached",
+            message: `Monthly event registration limit reached (${usedThisMonth}/${monthlyCap})`,
+            used: usedThisMonth,
+            cap: monthlyCap,
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     }
 
     // Check existing registration

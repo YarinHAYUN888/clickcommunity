@@ -1,7 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { VoiceIntroDraft } from '@/contexts/OnboardingContext';
-import { extensionForMime } from '@/services/voiceIntroRecording';
+import { extensionForMime, VOICE_INTRO_MIN_SEC, VOICE_INTRO_MAX_SEC } from '@/services/voiceIntroRecording';
 
 /**
  * After profile upsert + auth session exists. Never throws — signup must complete.
@@ -17,7 +17,7 @@ export async function uploadVoiceIntroAfterProfile(
   }
 
   const duration = draft.durationSec;
-  if (duration < 9.5 || duration > 90.5) {
+  if (duration < VOICE_INTRO_MIN_SEC - 0.5 || duration > VOICE_INTRO_MAX_SEC + 0.5) {
     console.warn('[voiceIntroUpload] skip_invalid_duration', { userId, duration });
     return;
   }

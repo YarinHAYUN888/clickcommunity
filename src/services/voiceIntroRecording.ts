@@ -27,5 +27,5 @@ export function extensionForMime(mime: string): string {
   return 'webm';
 }
 
-export const VOICE_INTRO_MIN_SEC = 10;
+export const VOICE_INTRO_MIN_SEC = 45;
 export const VOICE_INTRO_MAX_SEC = 90;

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MoreVertical, Flag, Ban, Lock, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, MoreVertical, Flag, Ban, Lock, MessageCircle, ChevronLeft, ChevronRight, Heart, Zap } from 'lucide-react';
 import { SupabaseProfile } from '@/hooks/useCurrentUser';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import InterestPill from './InterestPill';
@@ -8,6 +8,9 @@ import CompatibilityArc from './CompatibilityArc';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { partnerPreviewFromProfile } from '@/services/chat';
+import { SwipeAction } from '@/services/clicksSwipe';
+import type { CompatibilityEnrichment } from '@/services/matching';
+import PremiumMatchSection from '@/components/clicks/PremiumMatchSection';
 
 interface FullProfileModalProps {
   open: boolean;
@@ -16,6 +19,9 @@ interface FullProfileModalProps {
   compatibilityScore: number;
   sharedInterests: string[];
   isMember: boolean;
+  swipeBusy?: boolean;
+  onSwipe?: (action: SwipeAction) => void | Promise<void>;
+  matchEnrichment?: CompatibilityEnrichment | null;
 }
 
 export default function FullProfileModal({
@@ -25,6 +31,9 @@ export default function FullProfileModal({
   compatibilityScore,
   sharedInterests,
   isMember,
+  swipeBusy,
+  onSwipe,
+  matchEnrichment,
 }: FullProfileModalProps) {
   const navigate = useNavigate();
   const [photoIdx, setPhotoIdx] = useState(0);
@@ -36,6 +45,8 @@ export default function FullProfileModal({
   const age = profile.date_of_birth
     ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / 31557600000)
     : null;
+
+  const effectiveScore = matchEnrichment?.match?.compatibility_score ?? compatibilityScore;
 
   const handleScroll = () => {
     if (scrollRef.current) setScrollY(scrollRef.current.scrollTop);
@@ -50,6 +61,15 @@ export default function FullProfileModal({
       state: { partnerPreview: partnerPreviewFromProfile(profile) },
     });
     onClose();
+  };
+
+  const runSwipe = (action: SwipeAction) => {
+    if (!onSwipe) return;
+    if (!isMember) {
+      toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
+      return;
+    }
+    void onSwipe(action);
   };
 
   return (
@@ -174,13 +194,55 @@ export default function FullProfileModal({
                 )}
 
                 <div className="flex justify-center">
-                  <CompatibilityArc score={compatibilityScore} size="lg" animate />
+                  <CompatibilityArc score={effectiveScore} size="lg" animate />
                 </div>
+
+                {matchEnrichment && (
+                  <PremiumMatchSection
+                    compatibilityReason={matchEnrichment.match.compatibility_reason}
+                    aiSummary={matchEnrichment.match.ai_summary}
+                    highlights={matchEnrichment.highlights ?? null}
+                  />
+                )}
               </div>
             </div>
 
             {/* Sticky bottom action */}
-            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-card via-card to-transparent pb-[calc(16px+env(safe-area-inset-bottom))]">
+            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-card via-card to-transparent pb-[calc(16px+env(safe-area-inset-bottom))] space-y-3">
+              {onSwipe && (
+                <div className="flex justify-center gap-3" dir="ltr">
+                  <motion.button
+                    type="button"
+                    disabled={!!swipeBusy}
+                    whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                    onClick={() => runSwipe('pass')}
+                    className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-border bg-background text-muted-foreground shadow-sm disabled:opacity-50"
+                    title="דילוג"
+                  >
+                    <X size={22} strokeWidth={2.5} />
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    disabled={!!swipeBusy}
+                    whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                    onClick={() => runSwipe('super_like')}
+                    className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50"
+                    title="סופר־לייק"
+                  >
+                    <Zap size={22} className="fill-current" />
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    disabled={!!swipeBusy}
+                    whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                    onClick={() => runSwipe('like')}
+                    className="flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-md disabled:opacity-50"
+                    title="לייק"
+                  >
+                    <Heart size={22} className="fill-current" />
+                  </motion.button>
+                </div>
+              )}
               <motion.button onClick={handleMessage} whileTap={{ scale: 0.97 }} className="w-full h-[52px] rounded-full gradient-primary text-primary-foreground font-semibold text-base flex items-center justify-center gap-2">
                 {isMember ? <><MessageCircle size={18} /> שלח/י הודעה</> : <><Lock size={18} /> שלח/י הודעה 🔒</>}
               </motion.button>

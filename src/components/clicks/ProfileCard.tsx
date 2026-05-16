@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, Eye, Lock, Snowflake, Calendar } from 'lucide-react';
+import { MessageCircle, Eye, Lock, Calendar, Heart, X, Zap } from 'lucide-react';
 import { motion, useInView } from 'framer-motion';
 import GlassCard from './GlassCard';
-import StatusBadge from './StatusBadge';
 import InterestPill from './InterestPill';
 import CompatibilityArc from './CompatibilityArc';
 import { SupabaseProfile } from '@/hooks/useCurrentUser';
@@ -12,6 +11,9 @@ import { toast } from 'sonner';
 import PremiumButton from '@/components/ui/PremiumButton';
 import { springs } from '@/lib/motion';
 import { partnerPreviewFromProfile } from '@/services/chat';
+import { SwipeAction } from '@/services/clicksSwipe';
+import type { CompatibilityEnrichment } from '@/services/matching';
+import PremiumMatchSection from '@/components/clicks/PremiumMatchSection';
 
 interface ProfileCardProps {
   profile: SupabaseProfile;
@@ -23,8 +25,12 @@ interface ProfileCardProps {
   showEventBanner?: string;
   /** יש הודעה שלא נקראה ממנו בצ׳אט ישיר */
   hasUnreadDm?: boolean;
+  swipeBusy?: boolean;
+  onSwipe?: (action: SwipeAction) => void | Promise<void>;
   onViewProfile: () => void;
   onIcebreaker: () => void;
+  /** Server-side match row + highlights when compute-compatibility ran */
+  matchEnrichment?: CompatibilityEnrichment | null;
 }
 
 export default function ProfileCard({
@@ -36,8 +42,11 @@ export default function ProfileCard({
   isMember,
   showEventBanner,
   hasUnreadDm,
+  swipeBusy,
+  onSwipe,
   onViewProfile,
   onIcebreaker,
+  matchEnrichment,
 }: ProfileCardProps) {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -61,6 +70,15 @@ export default function ProfileCard({
     });
   };
 
+  const runSwipe = (action: SwipeAction) => {
+    if (!onSwipe) return;
+    if (!isMember) {
+      toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
+      return;
+    }
+    void onSwipe(action);
+  };
+
   const photoSrc = profile.photos?.[0] || profile.avatar_url || '';
   const allInterestsArr = profile.interests || [];
   const nonShared = allInterestsArr.filter(i => !sharedInterests.includes(i));
@@ -69,6 +87,8 @@ export default function ProfileCard({
   const age = profile.date_of_birth
     ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / 31557600000)
     : null;
+
+  const effectiveScore = matchEnrichment?.match?.compatibility_score ?? compatibilityScore;
 
   return (
     <motion.div
@@ -165,8 +185,54 @@ export default function ProfileCard({
 
           {/* Compatibility arc */}
           <div className="flex justify-center">
-            <CompatibilityArc score={compatibilityScore} size="sm" animate={arcVisible} />
+            <CompatibilityArc score={effectiveScore} size="sm" animate={arcVisible} />
           </div>
+
+          {matchEnrichment && (
+            <PremiumMatchSection
+              compatibilityReason={matchEnrichment.match.compatibility_reason}
+              aiSummary={matchEnrichment.match.ai_summary}
+              highlights={matchEnrichment.highlights ?? null}
+            />
+          )}
+
+          {onSwipe && (
+            <div className="flex justify-center gap-3 pt-1" dir="ltr">
+              <motion.button
+                type="button"
+                disabled={!!swipeBusy}
+                whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                transition={springs.snappy}
+                onClick={() => runSwipe('pass')}
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-border bg-background text-muted-foreground shadow-sm disabled:opacity-50"
+                title="דילוג"
+              >
+                <X size={22} strokeWidth={2.5} />
+              </motion.button>
+              <motion.button
+                type="button"
+                disabled={!!swipeBusy}
+                whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                transition={springs.snappy}
+                onClick={() => runSwipe('super_like')}
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50"
+                title="סופר־לייק"
+              >
+                <Zap size={22} className="fill-current" />
+              </motion.button>
+              <motion.button
+                type="button"
+                disabled={!!swipeBusy}
+                whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                transition={springs.snappy}
+                onClick={() => runSwipe('like')}
+                className="flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-md disabled:opacity-50"
+                title="לייק"
+              >
+                <Heart size={22} className="fill-current" />
+              </motion.button>
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex gap-3">

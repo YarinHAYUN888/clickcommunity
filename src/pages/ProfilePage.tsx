@@ -9,6 +9,7 @@ import { getMyProfile, getProfileStats } from '@/services/profile';
 import { motion } from 'framer-motion';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
+import { lifeNicheLabel } from '@/data/lifeNiche';
 
 interface ProfileStats {
   events_attended: number;
@@ -234,6 +235,9 @@ export default function ProfilePage() {
             </h1>
             {profile?.status && <StatusBadge status={profile.status} />}
           </div>
+          {profile?.life_niche && (
+            <p className="text-white/70 text-sm mt-1">{lifeNicheLabel(profile.life_niche)}</p>
+          )}
           {profile?.occupation && <p className="text-white/80 text-base mt-0.5">{profile.occupation}</p>}
         </div>
 

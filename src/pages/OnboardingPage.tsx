@@ -5,6 +5,7 @@ import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles } from 'lucide-react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { LIFE_NICHE_OPTIONS, isValidLifeNiche } from '@/data/lifeNiche';
 import { IntroductionQuestionnaireStep } from '@/components/onboarding/IntroductionQuestionnaireStep';
 import OnboardingProgress from '@/components/onboarding/OnboardingProgress';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
@@ -57,17 +58,26 @@ const interestsList = [
 
 type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
 
-async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
+async function saveProfileToSupabase(
+  data: any,
+  userId: string,
+  opts?: { imageUploadStatus?: 'success' | 'failed' | 'pending' },
+): Promise<void> {
   console.info('[saveProfileToSupabase] start', { userId });
   const dob = data.dateOfBirth
     ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
     : null;
 
+  const photoList = Array.isArray(data.photos) ? (data.photos as string[]).filter((u) => typeof u === 'string' && u.length > 0) : [];
+  const resolvedImageStatus =
+    opts?.imageUploadStatus ?? (photoList.length > 0 ? 'success' : 'failed');
+
   const profileData: ProfilesInsert = {
     user_id: userId,
     updated_at: new Date().toISOString(),
     profile_completed: true,
-    image_upload_status: 'success',
+    image_upload_status: resolvedImageStatus,
+    moderation_status: 'pending',
   };
   if (data.firstName) profileData.first_name = data.firstName;
   if (data.lastName !== undefined && data.lastName !== null) {
@@ -77,11 +87,12 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
   if (data.phone) profileData.phone = data.phone;
   if (dob) profileData.date_of_birth = dob;
   if (data.gender) profileData.gender = data.gender;
-  if (data.photos && data.photos.length > 0) {
-    profileData.photos = data.photos;
-    profileData.avatar_url = data.photos[0];
+  if (photoList.length > 0) {
+    profileData.photos = photoList;
+    profileData.avatar_url = photoList[0];
   }
   if (data.occupation) profileData.occupation = data.occupation;
+  if (data.life_niche && isValidLifeNiche(data.life_niche)) profileData.life_niche = data.life_niche;
   if (data.bio !== undefined) profileData.bio = data.bio;
   if (data.interests && data.interests.length > 0) profileData.interests = data.interests;
   if (data.region) profileData.region = data.region;
@@ -94,13 +105,13 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
 
   let { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
   if (error) {
-    // Backward-compatible fallback when newest columns are not deployed yet in target DB.
     const fallbackData: ProfilesInsert = {
       ...profileData,
       updated_at: new Date().toISOString(),
     };
     delete (fallbackData as Record<string, unknown>).profile_completed;
     delete (fallbackData as Record<string, unknown>).image_upload_status;
+    delete (fallbackData as Record<string, unknown>).moderation_status;
     const fallback = await supabase.from('profiles').upsert(fallbackData, { onConflict: 'user_id' });
     error = fallback.error;
   }
@@ -112,13 +123,14 @@ async function saveProfileToSupabase(data: any, userId: string): Promise<void> {
     .from('profiles')
     .update({
       profile_completed: true,
-      image_upload_status: 'success',
+      image_upload_status: resolvedImageStatus,
+      moderation_status: 'pending',
     })
     .eq('user_id', userId);
   if (flagsErr && import.meta.env.DEV) {
-    console.warn('[saveProfileToSupabase] profile_completed / image_upload_status patch:', flagsErr.message);
+    console.warn('[saveProfileToSupabase] flags patch:', flagsErr.message);
   }
-  console.info('[saveProfileToSupabase] success', { userId, hasAvatar: !!profileData.avatar_url });
+  console.info('[saveProfileToSupabase] success', { userId, hasAvatar: !!profileData.avatar_url, imageUpload: resolvedImageStatus });
 }
 
 export default function OnboardingPage() {
@@ -149,7 +161,7 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, step]);
 
   const goBack = () => {
     if (currentIndex > 0) navigate(`/onboarding/${steps[currentIndex - 1]}`);
@@ -240,6 +252,12 @@ function CredentialsStep({ data, updateData, onNext }: { data: any; updateData: 
     setTouched(true);
     if (!canContinue) return;
     updateData({ firstName, lastName, email, password, phone });
+    try {
+      const cleaned = phone.replace(/[-\s]/g, '').replace(/^0/, '');
+      if (cleaned) sessionStorage.setItem('clicks_onboarding_phone_backup', cleaned);
+    } catch {
+      /* ignore */
+    }
     onNext();
   };
 
@@ -568,7 +586,7 @@ function PhotoSlot({ index, photo, isPrimary, fileRef, onSelect, onRemove, class
         </>
       ) : (
         <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer gap-1">
-          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" className="hidden" onChange={onSelect} />
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" className="hidden" onChange={onSelect} />
           <Plus size={24} className="text-primary-light" />
         </label>
       )}
@@ -590,18 +608,21 @@ const sanitizeHandle = (raw: string): string => {
 };
 
 function AboutStep({ data, updateData, onNext }: { data: any; updateData: any; onNext: () => void }) {
+  const [lifeNiche, setLifeNiche] = useState(data.life_niche || '');
   const [occupation, setOccupation] = useState(data.occupation || '');
   const [bio, setBio] = useState(data.bio || '');
   const [instagram, setInstagram] = useState(data.instagram || '');
   const [tiktok, setTiktok] = useState(data.tiktok || '');
   const [touched, setTouched] = useState(false);
+  const nicheValid = isValidLifeNiche(lifeNiche);
   const occValid = occupation.trim().length >= 2;
   const remaining = 300 - bio.length;
 
   const handleNext = () => {
     setTouched(true);
-    if (!occValid) return;
+    if (!nicheValid || !occValid) return;
     updateData({
+      life_niche: lifeNiche,
       occupation,
       bio,
       instagram: sanitizeHandle(instagram),
@@ -613,6 +634,29 @@ function AboutStep({ data, updateData, onNext }: { data: any; updateData: any; o
   return (
     <div className="space-y-6">
       <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">קצת עליך</h2>
+      <div>
+        <p className="text-[13px] font-medium text-muted-foreground mb-2">שלב חיים / נישה</p>
+        <select
+          value={lifeNiche}
+          onChange={(e) => setLifeNiche(e.target.value)}
+          className="w-full h-[52px] rounded-[16px] px-4 text-base bg-card outline-none transition-all appearance-none cursor-pointer"
+          style={{
+            border: `1px solid ${touched && !nicheValid ? 'hsl(0 84% 60%)' : nicheValid ? 'hsl(160 84% 39%)' : 'hsl(var(--border))'}`,
+          }}
+        >
+          <option value="">בחר/י את המסלול הקרוב אליך</option>
+          {LIFE_NICHE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {touched && !nicheValid && (
+          <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="text-[13px] text-destructive mt-1">
+            נא לבחור נישה — כך נציג לך אנשים באותו מקום בחיים
+          </motion.p>
+        )}
+      </div>
       <div>
         <div className="relative">
           <Briefcase size={20} className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -688,7 +732,7 @@ function AboutStep({ data, updateData, onNext }: { data: any; updateData: any; o
         </div>
       </div>
 
-      <StickyButton disabled={!occValid} onClick={handleNext} label="המשך" />
+      <StickyButton disabled={!occValid || !nicheValid} onClick={handleNext} label="המשך" />
     </div>
   );
 }
@@ -860,7 +904,9 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
   const navigate = useNavigate();
   const { voiceIntroDraftRef } = useOnboarding();
-  const [method, setMethod] = useState<'phone' | 'email'>(data.verificationMethod || '');
+  const [method, setMethod] = useState<'phone' | 'email' | ''>(() =>
+    data.verificationMethod === 'phone' || data.verificationMethod === 'email' ? data.verificationMethod : '',
+  );
   const [codeSent, setCodeSent] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [otpError, setOtpError] = useState('');
@@ -873,7 +919,52 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const generatedCodeRef = useRef<string>('');
 
-  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  useEffect(() => {
+    if (data.verificationMethod === 'phone' || data.verificationMethod === 'email') {
+      setMethod(data.verificationMethod);
+    }
+  }, [data.verificationMethod]);
+
+  useEffect(() => {
+    try {
+      const backup = sessionStorage.getItem('clicks_onboarding_phone_backup') || '';
+      const cleanedBackup = backup.replace(/[-\s]/g, '').replace(/^0/, '');
+      if (cleanedBackup && /^5\d{8}$/.test(cleanedBackup) && !data.phone?.trim()) {
+        updateData({ phone: cleanedBackup });
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [data.phone, updateData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user || cancelled) return;
+      const { route } = await resolvePostAuthRedirect(session.user.id);
+      if (cancelled) return;
+      if (import.meta.env.DEV) {
+        console.info('[VerifyStep] session restore — skip OTP, redirect', route);
+      }
+      navigate(route, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  const phoneClean = (() => {
+    const fromData = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+    if (fromData) return fromData;
+    try {
+      return (sessionStorage.getItem('clicks_onboarding_phone_backup') ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+    } catch {
+      return '';
+    }
+  })();
   const phoneLooksValid = /^5\d{8}$/.test(phoneClean);
 
   const [inviterName, setInviterName] = useState<string | null>(null);
@@ -925,6 +1016,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         region: data.region,
         regionOther: data.regionOther,
         occupation: data.occupation,
+        lifeNiche: data.life_niche,
         bio: data.bio,
         instagram: data.instagram,
         tiktok: data.tiktok,
@@ -949,7 +1041,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     try {
       console.info('[onboarding] photo upload start', { userId: uid, photoCount: data.photos?.length || 0 });
       const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
-      await saveProfileToSupabase({ ...data, photos: photoUrls }, uid);
+      const imageUploadStatus: 'success' | 'failed' = photoUrls.length > 0 ? 'success' : 'failed';
+      await saveProfileToSupabase({ ...data, photos: photoUrls }, uid, { imageUploadStatus });
       console.info('[onboarding] auth_and_profile_ok_voice_upload', { userId: uid });
       await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
       voiceIntroDraftRef.current = null;
@@ -1092,7 +1185,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       if (result.profileSyncFailed) {
         toast.warning('החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.');
       }
-      if (route === '/clicks') notifyProfileUpdated(result.userId);
+      if (route === '/clicks' || route === '/pending-review') notifyProfileUpdated(result.userId);
+      void supabase.functions.invoke('analyze-profile-personality', { body: {} }).catch(() => undefined);
       navigate(route, { replace: true });
       clearData();
     } catch (e) {

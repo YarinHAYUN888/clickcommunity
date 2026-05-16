@@ -625,6 +625,222 @@ export type Database = {
           },
         ]
       }
+      match_behavior_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
+      community_vouches: {
+        Row: {
+          created_at: string
+          event_id: string | null
+          id: string
+          target_user_id: string
+          voucher_user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          target_user_id: string
+          voucher_user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          target_user_id?: string
+          voucher_user_id?: string
+        }
+        Relationships: []
+      }
+      profile_matches: {
+        Row: {
+          ai_summary: string | null
+          compatibility_breakdown: Json
+          compatibility_reason: string | null
+          compatibility_score: number
+          created_at: string
+          id: string
+          match_status: string
+          updated_at: string
+          user_a: string
+          user_b: string
+        }
+        Insert: {
+          ai_summary?: string | null
+          compatibility_breakdown?: Json
+          compatibility_reason?: string | null
+          compatibility_score: number
+          created_at?: string
+          id?: string
+          match_status?: string
+          updated_at?: string
+          user_a: string
+          user_b: string
+        }
+        Update: {
+          ai_summary?: string | null
+          compatibility_breakdown?: Json
+          compatibility_reason?: string | null
+          compatibility_score?: number
+          created_at?: string
+          id?: string
+          match_status?: string
+          updated_at?: string
+          user_a?: string
+          user_b?: string
+        }
+        Relationships: []
+      }
+      profile_personality_ai: {
+        Row: {
+          ai_score: number | null
+          ai_tags: Json
+          analyzed_at: string | null
+          communication_style: string | null
+          community_risk: string
+          created_at: string
+          emotional_style: string | null
+          energy_type: string | null
+          id: string
+          lifestyle_type: string | null
+          personality_summary: string | null
+          relationship_intent: string | null
+          social_style: string | null
+          user_id: string
+        }
+        Insert: {
+          ai_score?: number | null
+          ai_tags?: Json
+          analyzed_at?: string | null
+          communication_style?: string | null
+          community_risk?: string
+          created_at?: string
+          emotional_style?: string | null
+          energy_type?: string | null
+          id?: string
+          lifestyle_type?: string | null
+          personality_summary?: string | null
+          relationship_intent?: string | null
+          social_style?: string | null
+          user_id: string
+        }
+        Update: {
+          ai_score?: number | null
+          ai_tags?: Json
+          analyzed_at?: string | null
+          communication_style?: string | null
+          community_risk?: string
+          created_at?: string
+          emotional_style?: string | null
+          energy_type?: string | null
+          id?: string
+          lifestyle_type?: string | null
+          personality_summary?: string | null
+          relationship_intent?: string | null
+          social_style?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profile_preferences: {
+        Row: {
+          created_at: string
+          drinking_preference: string | null
+          id: string
+          languages: string[]
+          max_age: number | null
+          min_age: number | null
+          preferred_gender: string | null
+          preferred_regions: string[]
+          relationship_goal: string | null
+          religion_preference: string | null
+          smoking_preference: string | null
+          updated_at: string
+          user_id: string
+          wants_children: string | null
+        }
+        Insert: {
+          created_at?: string
+          drinking_preference?: string | null
+          id?: string
+          languages?: string[]
+          max_age?: number | null
+          min_age?: number | null
+          preferred_gender?: string | null
+          preferred_regions?: string[]
+          relationship_goal?: string | null
+          religion_preference?: string | null
+          smoking_preference?: string | null
+          updated_at?: string
+          user_id: string
+          wants_children?: string | null
+        }
+        Update: {
+          created_at?: string
+          drinking_preference?: string | null
+          id?: string
+          languages?: string[]
+          max_age?: number | null
+          min_age?: number | null
+          preferred_gender?: string | null
+          preferred_regions?: string[]
+          relationship_goal?: string | null
+          religion_preference?: string | null
+          smoking_preference?: string | null
+          updated_at?: string
+          user_id?: string
+          wants_children?: string | null
+        }
+        Relationships: []
+      }
+      profile_swipes: {
+        Row: {
+          action: string
+          created_at: string
+          from_user_id: string
+          id: string
+          to_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          from_user_id: string
+          id?: string
+          to_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          from_user_id?: string
+          id?: string
+          to_user_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       points_history: {
         Row: {
           amount: number
@@ -664,8 +880,11 @@ export type Database = {
           first_name: string | null
           gender: string | null
           id: string
+          community_vouch_count: number
+          community_welcome_sms_sent_at: string | null
           instagram: string | null
           interests: string[] | null
+          life_niche: string | null
           last_name: string | null
           last_seen: string | null
           last_tenure_grant_at: string | null
@@ -713,11 +932,14 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           id?: string
+          community_vouch_count?: number
+          community_welcome_sms_sent_at?: string | null
           instagram?: string | null
           interests?: string[] | null
           last_name?: string | null
           last_seen?: string | null
           last_tenure_grant_at?: string | null
+          life_niche?: string | null
           occupation?: string | null
           phone?: string | null
           photos?: string[] | null
@@ -762,8 +984,11 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           id?: string
+          community_vouch_count?: number
+          community_welcome_sms_sent_at?: string | null
           instagram?: string | null
           interests?: string[] | null
+          life_niche?: string | null
           last_name?: string | null
           last_seen?: string | null
           last_tenure_grant_at?: string | null
@@ -938,6 +1163,16 @@ export type Database = {
       count_referrals_this_month: {
         Args: { p_user_id: string }
         Returns: number
+      }
+      get_dm_partner_preview: {
+        Args: { p_chat_id: string }
+        Returns: {
+          user_id: string
+          first_name: string | null
+          last_name: string | null
+          photos: string[] | null
+          avatar_url: string | null
+        }[]
       }
       get_user_vote_score: { Args: { p_user_id: string }; Returns: number }
       is_super_user: { Args: { p_user_id: string }; Returns: boolean }

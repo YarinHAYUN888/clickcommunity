@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, UserCheck, Calendar, MessageCircle, CreditCard, ChevronLeft, Workflow } from 'lucide-react';
+import { Users, UserCheck, Calendar, MessageCircle, CreditCard, ChevronLeft, Workflow, LineChart } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
@@ -37,6 +37,7 @@ const navCards = [
   { icon: Calendar, label: 'ניהול אירועים', route: '/admin/events' },
   { icon: MessageCircle, label: 'ניהול צ׳אטים', route: '/admin/chats' },
   { icon: CreditCard, label: 'ניהול מנויים', route: '/admin/subscriptions' },
+  { icon: UserCheck, label: 'קהילה ואישורים', route: '/admin/community' },
   { icon: Workflow, label: 'אוטומציות', route: '/admin/automation' },
 ];
 
@@ -107,6 +108,19 @@ export default function AdminDashboardPage() {
             );
           })}
         </div>
+
+        <GlassCard variant="strong" className="p-4 mt-6">
+          <div className="flex items-center gap-2 mb-2">
+            <LineChart size={22} className="text-primary" />
+            <h2 className="font-bold text-foreground text-base">מפת דרכים (צמיחה ותפעול)</h2>
+          </div>
+          <ul className="text-sm text-muted-foreground space-y-2 list-disc list-inside leading-relaxed">
+            <li>אנליטיקס: אירועי מוצר בצד הלקוח (PostHog / GA4) ודשבורד בסיסי</li>
+            <li>קמפיינים: דחיפה / אימייל לפי סגמנט (OneSignal / Resend) + טבלת קמפיינים באדמין</li>
+            <li>תזכורות לאירועים: Cron (pg_cron + Edge) לפי שעת אירוע בטבלת events</li>
+            <li>כספים: הרחבת דוחות מנוי ב-Stripe ובמסכי admin על בסיס subscriptions</li>
+          </ul>
+        </GlassCard>
       </div>
     </div>
   );

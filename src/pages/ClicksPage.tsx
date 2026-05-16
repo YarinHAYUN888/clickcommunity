@@ -8,18 +8,22 @@ import IcebreakerSheet from '@/components/clicks/IcebreakerSheet';
 import FullProfileModal from '@/components/clicks/FullProfileModal';
 import { useCurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
 import { useClicksFeed, ClickFeedItem } from '@/hooks/useClicksFeed';
+import { useCompatibilityLayer } from '@/hooks/useCompatibilityLayer';
 import { useNavigate } from 'react-router-dom';
 import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
-import { CHAT_UNREAD_REFRESH_EVENT } from '@/contexts/ChatUnreadContext';
+import { CHAT_UNREAD_REFRESH_EVENT, notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
+import { recordProfileSwipe, SwipeAction } from '@/services/clicksSwipe';
+import { toast } from 'sonner';
 
 export default function ClicksPage() {
   const navigate = useNavigate();
   const { profile: myProfile, authId, role, loading: userLoading } = useCurrentUser();
   const isMember = role === 'member';
-  const myInterests = myProfile?.interests || [];
   /** חובה להשתמש ב-authId מהסשן — לא ב-myProfile.user_id: אחרת כשטעינת הפרופיל מתעכבת הפיד יוצא ריק לצמיתות */
-  const { items, loading: feedLoading, refresh } = useClicksFeed(authId, myInterests);
+  const { items, loading: feedLoading, refresh } = useClicksFeed(authId, myProfile);
+  const matchByUserId = useCompatibilityLayer(authId, items);
   const loading = userLoading || feedLoading;
+  const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<'general' | 'event'>('general');
   const feedRef = useRef<HTMLDivElement>(null);
@@ -70,6 +74,42 @@ export default function ClicksPage() {
       window.clearInterval(iv);
     };
   }, [authId, feedUserIdsKey, feedUserIds.length]);
+
+  const handleSwipe = useCallback(
+    async (toUserId: string, action: SwipeAction) => {
+      if (!isMember) {
+        toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
+        return;
+      }
+      try {
+        setSwipeBusyUserId(toUserId);
+        const r = await recordProfileSwipe(toUserId, action);
+        if (r.mutual) {
+          if (r.chat_id) {
+            toast.success('יש התאמה! עוברים לצ׳אט');
+            notifyChatUnreadRefresh();
+            setProfileOpen(false);
+            navigate(`/chats/${r.chat_id}`);
+          } else {
+            toast.error('נוצרה התאמה אך לא נמצא צ׳אט. נסו שוב או פתחו הודעה מהרשימה.');
+          }
+        } else if (action === 'pass') {
+          toast('נרשם דילוג');
+        } else if (action === 'super_like') {
+          toast('נרשם סופר־לייק');
+        } else {
+          toast('נרשם לייק');
+        }
+        await refresh();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'לא ניתן לשמור את הפעולה.';
+        toast.error(msg);
+      } finally {
+        setSwipeBusyUserId(null);
+      }
+    },
+    [isMember, refresh, navigate],
+  );
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -190,6 +230,9 @@ export default function ClicksPage() {
                   index={i}
                   isMember={isMember}
                   hasUnreadDm={!!unreadFromUser[item.profile.user_id]}
+                  swipeBusy={swipeBusyUserId === item.profile.user_id}
+                  onSwipe={(action) => handleSwipe(item.profile.user_id, action)}
+                  matchEnrichment={matchByUserId[item.profile.user_id] ?? null}
                   onViewProfile={() => { setProfileTarget(item); setProfileOpen(true); }}
                   onIcebreaker={() => { setIcebreakerTarget(item); setIcebreakerOpen(true); }}
                 />
@@ -226,6 +269,9 @@ export default function ClicksPage() {
           compatibilityScore={profileTarget.compatibilityScore}
           sharedInterests={profileTarget.sharedInterests}
           isMember={isMember}
+          swipeBusy={swipeBusyUserId === profileTarget.profile.user_id}
+          onSwipe={(action) => handleSwipe(profileTarget.profile.user_id, action)}
+          matchEnrichment={matchByUserId[profileTarget.profile.user_id] ?? null}
         />
       )}
     </div>

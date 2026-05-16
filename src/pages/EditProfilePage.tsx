@@ -12,6 +12,7 @@ import { motion } from 'framer-motion';
 import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
 import { getPostAuthRouteFromProfile } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated, type SupabaseProfile } from '@/hooks/useCurrentUser';
+import { LIFE_NICHE_OPTIONS } from '@/data/lifeNiche';
 
 export default function EditProfilePage() {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ export default function EditProfilePage() {
 
   // Form state
   const [firstName, setFirstName] = useState('');
+  const [lifeNiche, setLifeNiche] = useState('');
   const [occupation, setOccupation] = useState('');
   const [bio, setBio] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
@@ -65,6 +67,7 @@ export default function EditProfilePage() {
         const photoList = normalizePhotoUrls(p.photos);
         const interestList = normalizeInterestLabels(p.interests);
         setFirstName(p.first_name || '');
+        setLifeNiche(p.life_niche || '');
         setOccupation(p.occupation || '');
         setBio(p.bio || '');
         setPhotos(photoList);
@@ -73,6 +76,7 @@ export default function EditProfilePage() {
         setGender(p.gender || '');
         setOriginal({
           first_name: p.first_name || '',
+          life_niche: p.life_niche || '',
           occupation: p.occupation || '',
           bio: p.bio || '',
           photos: photoList,
@@ -90,12 +94,13 @@ export default function EditProfilePage() {
     if (!original) return false;
     return (
       firstName !== original.first_name ||
+      lifeNiche !== original.life_niche ||
       occupation !== original.occupation ||
       bio !== original.bio ||
       JSON.stringify(photos) !== JSON.stringify(original.photos) ||
       JSON.stringify(interests) !== JSON.stringify(original.interests)
     );
-  }, [firstName, occupation, bio, photos, interests, original]);
+  }, [firstName, lifeNiche, occupation, bio, photos, interests, original]);
 
   const age = (() => {
     if (!dob) return null;
@@ -144,6 +149,7 @@ export default function EditProfilePage() {
     try {
       await updateProfile(authId, {
         first_name: firstName,
+        life_niche: lifeNiche.trim() ? lifeNiche.trim() : null,
         occupation,
         bio,
         photos,
@@ -290,6 +296,24 @@ export default function EditProfilePage() {
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-1">המגדר לא ניתן לשינוי</p>
+        </div>
+
+        {/* Life niche */}
+        <div>
+          <label className="text-sm font-semibold text-foreground mb-1.5 block">שלב חיים / נישה</label>
+          <select
+            value={lifeNiche}
+            onChange={(e) => setLifeNiche(e.target.value)}
+            className="w-full h-11 rounded-xl bg-muted px-4 text-sm text-foreground border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+          >
+            <option value="">לא הוגדר</option>
+            {LIFE_NICHE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">משמש להתאמות בפיד הקליקים יחד עם תחומי העניין</p>
         </div>
 
         {/* Occupation */}

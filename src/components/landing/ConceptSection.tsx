@@ -72,6 +72,13 @@ export default function ConceptSection() {
             >
               כל אירוע מתוכנן כך שכולם יוצאים ממנו עם היכרויות חדשות משמעותיות - דרך שאלות עומק על השולחנות, ועצם המרחב שהקונספט שלו הוא "להכיר" זה פשוט עושה את שלו ותרגישו את זה מהשניה הראשונה, כל חשש פשוט יעלם.
             </p>
+            <p
+              data-cursor="text"
+              className="mt-4 text-right text-[15px] md:text-[17px]"
+              style={{ color: '#4B5563', lineHeight: 1.75 }}
+            >
+              בהרשמה: שאלון קצר והקלטת קול בלבד (לא וידאו) — כדי שנכיר אתכם אותנטית לפני האישור לקהילה.
+            </p>
           </RevealOnScroll>
         </div>
         <RevealOnScroll delay={0.2} y={30}>

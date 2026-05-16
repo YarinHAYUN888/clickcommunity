@@ -39,6 +39,7 @@ export default function SuitabilityGate() {
     profile?.status,
     profile?.profile_completed,
     profile?.image_upload_status,
+    profile?.suspended,
   ]);
 
   if (loading) {

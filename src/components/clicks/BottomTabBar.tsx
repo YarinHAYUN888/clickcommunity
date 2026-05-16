@@ -7,11 +7,12 @@ import { useChatUnreadCount } from '@/contexts/ChatUnreadContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { springs } from '@/lib/motion';
 
+/** סדר כמו באפיון: פרופיל, צ׳אטים, קליקים, אירועים, מנוי */
 const baseTabs = [
+  { icon: User, label: 'פרופיל', path: '/profile' },
+  { icon: MessageCircle, label: 'צ׳אטים', path: '/chats' },
   { icon: Heart, label: 'קליקים', path: '/clicks' },
   { icon: Calendar, label: 'אירועים', path: '/events' },
-  { icon: MessageCircle, label: 'צ׳אטים', path: '/chats' },
-  { icon: User, label: 'פרופיל', path: '/profile' },
   { icon: Crown, label: 'מנוי', path: '/subscription' },
 ] as const;
 

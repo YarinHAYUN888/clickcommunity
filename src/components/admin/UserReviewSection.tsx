@@ -75,8 +75,8 @@ export function UserReviewSection() {
         suitability_status === 'active'
           ? 'approved'
           : suitability_status === 'blocked'
-          ? 'rejected'
-          : 'pending';
+            ? 'rejected'
+            : 'approved';
       const row = rows.find((r) => r.user_id === userId);
       const hasPhotos =
         (Array.isArray(row?.photos) && row.photos.some((u) => typeof u === 'string' && u.length > 0)) ||
@@ -181,7 +181,9 @@ export function UserReviewSection() {
                           <div className="flex-1 min-w-0 text-right">
                             <p className="font-semibold text-foreground truncate">{name}</p>
                             <p className="text-xs text-muted-foreground">{email}</p>
-                            <p className="text-xs font-medium text-primary mt-1">סטטוס: {r.suitability_status}</p>
+                            <p className="text-xs font-medium text-primary mt-1">
+                              סטטוס: {r.suitability_status === 'shadow' ? 'מבודד' : r.suitability_status}
+                            </p>
                           </div>
                         </div>
                         <p className="text-xs text-muted-foreground line-clamp-3">

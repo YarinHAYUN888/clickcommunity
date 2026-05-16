@@ -59,7 +59,7 @@ export function IntroductionQuestionnaireStep({
       <div>
         <h2 className="text-[26px] md:text-[32px] font-bold text-foreground leading-tight">שאלון היכרות קצר</h2>
         <p className="text-muted-foreground text-[15px] mt-2 leading-relaxed">
-          כמה שאלות פתוחות כדי שנכיר אתכם טוב יותר. התשובות נשמרות בפרופיל ומשמשות גם לבדיקת התאמה איכותית.
+          כמה שאלות פתוחות כדי שנכיר אתכם טוב יותר. לפני השאלות יש אפשרות להקלטה קולית קצרה (לא וידאו) — האורך הנדרש מוצג שם.
         </p>
       </div>
 

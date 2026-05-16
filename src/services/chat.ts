@@ -124,8 +124,25 @@ export async function getGroupChats(userId: string) {
   return (data || []) as ChatRow[];
 }
 
-/** Partner profile for DM header / list; may be partial if RLS still hides columns (use participant fallback). */
+type DmPartnerRow = {
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  photos: string[] | null;
+  avatar_url: string | null;
+};
+
+/** Partner profile for DM header / list; prefers RPC (bypasses profiles RLS for chat peers). */
 export async function getDmPartner(chatId: string, currentUserId: string) {
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('get_dm_partner_preview', {
+    p_chat_id: chatId,
+  });
+
+  if (!rpcError && Array.isArray(rpcRows) && rpcRows.length > 0) {
+    const row = rpcRows[0] as DmPartnerRow;
+    if (row?.user_id) return row;
+  }
+
   const { data: rows, error } = await supabase
     .from('chat_participants')
     .select('user_id, joined_at')
@@ -368,10 +385,15 @@ export async function createOrGetDm(otherUserId: string, icebreakerText?: string
   const { data, error } = await supabase.functions.invoke('create-or-get-dm', {
     body: { other_user_id: otherUserId, icebreaker_text: icebreakerText },
   });
-  if (error) throw error;
-  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
-    throw new Error(String((data as { error: string }).error));
+  const body = data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+  const errMsg = typeof body?.error === 'string' ? body.error.trim() : '';
+  if (errMsg) {
+    if (/shadow isolation|cannot start dm across universes/i.test(errMsg)) {
+      throw new Error('לא ניתן לפתוח צ׳אט עם משתמש/ת זו.');
+    }
+    throw new Error(errMsg);
   }
+  if (error) throw error;
   return data as { chat_id: string; is_new?: boolean; first_message_id?: string | null };
 }
 

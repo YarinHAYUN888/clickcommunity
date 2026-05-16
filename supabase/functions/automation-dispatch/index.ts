@@ -285,6 +285,19 @@ Deno.serve(async (req) => {
       },
     };
 
+    if (intent === "campaign") {
+      const em = String(outbound.recipient?.email ?? "").trim().toLowerCase();
+      if (em === "test@example.com" || em.endsWith("@example.com") || em.endsWith("@example.org")) {
+        return new Response(
+          JSON.stringify({
+            error: "synthetic_recipient_email_blocked",
+            message: "Campaign sends cannot target placeholder/example addresses. Use manual_test in developer mode.",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     applyTransactionalEmailWrapper(outbound, {
       logoUrl: Deno.env.get("EMAIL_LOGO_URL")?.trim() || "",
       brandAccentColor: Deno.env.get("EMAIL_BRAND_COLOR")?.trim() || "#7c3aed",

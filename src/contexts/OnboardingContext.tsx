@@ -20,6 +20,8 @@ export interface OnboardingData {
   regionOther: string;
   photos: string[];
   occupation: string;
+  /** Persona key — same as profiles.life_niche */
+  life_niche: string;
   bio: string;
   instagram: string;
   tiktok: string;
@@ -42,6 +44,7 @@ const defaultData: OnboardingData = {
   regionOther: '',
   photos: [],
   occupation: '',
+  life_niche: '',
   bio: '',
   instagram: '',
   tiktok: '',
@@ -129,6 +132,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(STORAGE_KEY);
     try {
       sessionStorage.removeItem(PWD_SESSION_KEY);
+      sessionStorage.removeItem('clicks_onboarding_phone_backup');
     } catch {
       /* ignore sessionStorage */
     }
