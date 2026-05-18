@@ -172,12 +172,13 @@ export async function cancelSubscription(userId: string) {
 
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
 export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
-  console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: sources.length });
+  const validSources = sources.filter((s) => typeof s === 'string' && s.length > 0);
+  console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
   const projectUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? '';
   const out: string[] = [];
-  for (let i = 0; i < sources.length; i++) {
-    const s = sources[i];
-    if (!s) continue;
+  const errors: { index: number; message: string }[] = [];
+  for (let i = 0; i < validSources.length; i++) {
+    const s = validSources[i];
     if (s.startsWith('data:') || s.startsWith('blob:')) {
       try {
         const res = await fetch(s);
@@ -188,7 +189,9 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
         const file = await prepareImageFileForUpload(rawFile, i);
         out.push(await uploadProfilePhoto(userId, file, i));
       } catch (e) {
-        console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed (continuing)', { userId, index: i, e });
+        const message = e instanceof Error ? e.message : String(e);
+        console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: i, message });
+        errors.push({ index: i, message });
       }
       continue;
     }
@@ -202,6 +205,10 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
     out.push(s);
   }
   console.info('[uploadOnboardingPhotosFromDataUrls] done', { userId, uploadedCount: out.length });
+  if (validSources.length > 0 && out.length === 0) {
+    const detail = errors.map((e) => `#${e.index}: ${e.message}`).join('; ');
+    throw new Error(detail ? `photo_upload_failed:${detail}` : 'photo_upload_failed');
+  }
   return out;
 }
 

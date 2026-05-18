@@ -62,12 +62,15 @@ interface OnboardingContextType {
   updateData: (partial: Partial<OnboardingData>) => void;
   clearData: () => void;
   voiceIntroDraftRef: MutableRefObject<VoiceIntroDraft>;
+  /** In-memory only — data URLs are too large for localStorage. */
+  photosDraftRef: MutableRefObject<string[]>;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | null>(null);
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const voiceIntroDraftRef = useRef<VoiceIntroDraft>(null);
+  const photosDraftRef = useRef<string[]>([]);
 
   const [data, setData] = useState<OnboardingData>(() => {
     let refFromStore = '';
@@ -81,9 +84,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       const savedPwd = sessionStorage.getItem(PWD_SESSION_KEY) || '';
       if (saved) {
         const parsed = JSON.parse(saved);
+        const { photos: _storedPhotos, ...parsedWithoutPhotos } = parsed as OnboardingData & { photos?: unknown };
         return {
           ...defaultData,
-          ...parsed,
+          ...parsedWithoutPhotos,
+          photos: [],
           referralCode: (parsed.referralCode as string) || refFromStore,
           password: savedPwd,
           questionnaireResponses: {
@@ -107,8 +112,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      // Don't persist password to localStorage
-      const { password, ...safe } = data;
+      // Don't persist password or photos (data URLs exceed localStorage quota)
+      const { password, photos, ...safe } = data;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
     } catch {
       /* ignore localStorage */
@@ -123,11 +128,15 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         /* ignore sessionStorage */
       }
     }
+    if (partial.photos !== undefined) {
+      photosDraftRef.current = partial.photos.filter((u) => typeof u === 'string' && u.length > 0);
+    }
     setData(prev => ({ ...prev, ...partial }));
   };
 
   const clearData = () => {
     voiceIntroDraftRef.current = null;
+    photosDraftRef.current = [];
     setData(defaultData);
     localStorage.removeItem(STORAGE_KEY);
     try {
@@ -139,7 +148,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <OnboardingContext.Provider value={{ data, updateData, clearData, voiceIntroDraftRef }}>
+    <OnboardingContext.Provider value={{ data, updateData, clearData, voiceIntroDraftRef, photosDraftRef }}>
       {children}
     </OnboardingContext.Provider>
   );

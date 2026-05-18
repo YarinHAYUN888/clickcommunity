@@ -52,10 +52,6 @@ export default function EditProfilePage() {
           return;
         }
         const nextRoute = getPostAuthRouteFromProfile(p as unknown as SupabaseProfile);
-        if (nextRoute === '/clicks') {
-          navigate('/clicks', { replace: true });
-          return;
-        }
         if (nextRoute === '/pending-review') {
           navigate('/pending-review', { replace: true });
           return;

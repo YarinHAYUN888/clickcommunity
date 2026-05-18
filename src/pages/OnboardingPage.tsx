@@ -518,8 +518,12 @@ function BasicsStep({ data, updateData, onNext }: { data: any; updateData: any; 
 
 // ---- STEP 3: Photos ----
 function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; onNext: () => void }) {
+  const { photosDraftRef } = useOnboarding();
   const [photos, setPhotos] = useState<(string | null)[]>(() => {
-    const saved = data.photos || [];
+    const saved =
+      photosDraftRef.current.length > 0
+        ? photosDraftRef.current
+        : (data.photos?.length ? data.photos : []);
     const arr = Array(6).fill(null);
     saved.forEach((p: string, i: number) => { if (i < 6) arr[i] = p; });
     return arr;
@@ -542,7 +546,9 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
   };
 
   const handleNext = () => {
-    updateData({ photos: photos.filter(Boolean) as string[] });
+    const list = photos.filter(Boolean) as string[];
+    photosDraftRef.current = list;
+    updateData({ photos: list });
     onNext();
   };
 
@@ -903,7 +909,7 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 // ---- STEP 6: Verify ----
 function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
   const navigate = useNavigate();
-  const { voiceIntroDraftRef } = useOnboarding();
+  const { voiceIntroDraftRef, photosDraftRef } = useOnboarding();
   const [method, setMethod] = useState<'phone' | 'email' | ''>(() =>
     data.verificationMethod === 'phone' || data.verificationMethod === 'email' ? data.verificationMethod : '',
   );
@@ -1036,16 +1042,29 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       throw new Error('session_creation_failed');
     }
 
+    const {
+      data: { session: activeSession },
+    } = await supabase.auth.getSession();
+    if (!activeSession?.user) {
+      throw new Error('session_creation_failed');
+    }
+
     const uid = verifyData.user.id;
+    const onboardingPhotos =
+      photosDraftRef.current.length > 0
+        ? photosDraftRef.current
+        : (data.photos ?? []).filter((u: unknown) => typeof u === 'string' && u.length > 0);
+
     let profileSyncFailed = false;
     try {
-      console.info('[onboarding] photo upload start', { userId: uid, photoCount: data.photos?.length || 0 });
-      const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, data.photos ?? []);
+      console.info('[onboarding] photo upload start', { userId: uid, photoCount: onboardingPhotos.length });
+      const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, onboardingPhotos);
       const imageUploadStatus: 'success' | 'failed' = photoUrls.length > 0 ? 'success' : 'failed';
       await saveProfileToSupabase({ ...data, photos: photoUrls }, uid, { imageUploadStatus });
       console.info('[onboarding] auth_and_profile_ok_voice_upload', { userId: uid });
       await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
       voiceIntroDraftRef.current = null;
+      photosDraftRef.current = [];
       try {
         await runUserAnalysis(
           {
@@ -1077,6 +1096,9 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
           ai_summary: 'Profile sync failed after auth creation',
         })
         .eq('user_id', uid);
+      if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
+        throw new Error('photo_upload_failed');
+      }
       profileSyncFailed = true;
     }
 
@@ -1094,7 +1116,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       console.warn('claim-signup-rewards:', e);
     }
     return { profileSyncFailed, userId: uid };
-  }, [data, voiceIntroDraftRef]);
+  }, [data, voiceIntroDraftRef, photosDraftRef]);
 
   const handleSendCode = useCallback(async () => {
     if (!method) return;
@@ -1205,6 +1227,10 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         setOtpError('החשבון נוצר אך ההתחברות נכשלה. נסה/י להתחבר עם האימייל והסיסמה.');
       } else if (e instanceof Error && e.message === 'profile_save_failed') {
         setOtpError('לא הצלחנו לשמור את פרטי הפרופיל או התמונות. נסה/י שוב.');
+      } else if (e instanceof Error && e.message === 'photo_upload_failed') {
+        setOtpError(
+          'החשבון נוצר אך התמונות לא נשמרו. נסה/י שוב, או הוסף/י תמונות מעמוד הפרופיל אחרי ההתחברות.',
+        );
       } else {
         setOtpError('שגיאה ביצירת החשבון. נסה/י שוב.');
       }
