@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ClipboardList, X, User } from 'lucide-react';
 import { toast } from 'sonner';
@@ -18,6 +18,12 @@ export function UserReviewSection() {
   const [rows, setRows] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+
+  const selectedRow = useMemo(
+    () => rows.find((r) => r.user_id === selectedUserId) ?? null,
+    [rows, selectedUserId],
+  );
 
   const refreshCount = useCallback(async () => {
     const { count, error } = await supabase
@@ -66,6 +72,16 @@ export function UserReviewSection() {
       void supabase.removeChannel(channel);
     };
   }, [panelOpen, loadRows]);
+
+  useEffect(() => {
+    if (!panelOpen || rows.length === 0) {
+      if (rows.length === 0) setSelectedUserId(null);
+      return;
+    }
+    if (!selectedUserId || !rows.some((r) => r.user_id === selectedUserId)) {
+      setSelectedUserId(rows[0].user_id);
+    }
+  }, [panelOpen, rows, selectedUserId]);
 
   async function act(userId: string, suitability_status: 'active' | 'shadow' | 'blocked') {
     setBusyId(userId);
@@ -127,7 +143,7 @@ export function UserReviewSection() {
       <AnimatePresence>
         {panelOpen && (
           <motion.div
-            className="fixed inset-0 z-[100] flex items-end md:items-center justify-center p-0 md:p-6"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -141,14 +157,19 @@ export function UserReviewSection() {
             />
             <motion.div
               dir="rtl"
-              className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-t-3xl md:rounded-3xl bg-card border border-border shadow-2xl flex flex-col"
-              initial={{ y: 40, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 24, opacity: 0 }}
+              className="relative w-full max-w-lg max-h-[min(90dvh,720px)] overflow-hidden rounded-2xl bg-card border border-border shadow-2xl flex flex-col"
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
               transition={{ type: 'spring', damping: 26, stiffness: 280 }}
             >
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                <h2 className="text-lg font-bold text-foreground">אישור משתמשים</h2>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">אישור משתמשים</h2>
+                  {badgeCount > 0 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{badgeCount} ממתינים</p>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setPanelOpen(false)}
@@ -157,13 +178,51 @@ export function UserReviewSection() {
                   <X size={20} className="text-muted-foreground" />
                 </button>
               </div>
-              <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {!loading && rows.length > 1 && (
+                <div className="shrink-0 px-3 py-2 border-b border-border overflow-x-auto">
+                  <div className="flex gap-2 min-w-min">
+                    {rows.map((pick) => {
+                      const thumb = pick.photos?.[0] || pick.avatar_url;
+                      const label = pick.first_name || 'ללא שם';
+                      const active = pick.user_id === selectedUserId;
+                      return (
+                        <button
+                          key={pick.user_id}
+                          type="button"
+                          onClick={() => setSelectedUserId(pick.user_id)}
+                          className={`shrink-0 flex flex-col items-center gap-1 w-14 transition-opacity ${
+                            active ? 'opacity-100' : 'opacity-55'
+                          }`}
+                        >
+                          <div
+                            className={`w-12 h-12 rounded-xl overflow-hidden bg-muted border-2 ${
+                              active ? 'border-primary' : 'border-transparent'
+                            }`}
+                          >
+                            {thumb ? (
+                              <img src={thumb} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User size={18} className="text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-medium text-foreground truncate w-full text-center">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3">
                 {loading ? (
                   <p className="text-sm text-muted-foreground text-center py-8">טוען…</p>
                 ) : rows.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">אין משתמשים הממתינים לאישור</p>
                 ) : (
-                  rows.map((r) => {
+                  rows.filter((r) => r.user_id === selectedUserId).map((r) => {
                     const img = r.photos?.[0] || r.avatar_url;
                     const name = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'ללא שם';
                     const email = '—';
@@ -222,37 +281,41 @@ export function UserReviewSection() {
                           <p>ביטחון: <span className="text-foreground font-semibold">{r.moderation_confidence ?? '—'}</span></p>
                           <p>סיבה: <span className="text-foreground font-semibold">{r.moderation_reason || '—'}</span></p>
                         </div>
-                        <div className="flex flex-wrap gap-2 justify-end">
-                          <button
-                            type="button"
-                            disabled={busyId === r.user_id}
-                            onClick={() => void act(r.user_id, 'active')}
-                            className="px-3 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground disabled:opacity-50 transition-opacity"
-                          >
-                            אישור לקהילה
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyId === r.user_id}
-                            onClick={() => void act(r.user_id, 'shadow')}
-                            className="px-3 py-2 rounded-xl text-xs font-semibold border border-border hover:bg-muted/60 disabled:opacity-50 transition-colors"
-                          >
-                            סביבה מבודדת
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyId === r.user_id}
-                            onClick={() => void act(r.user_id, 'blocked')}
-                            className="px-3 py-2 rounded-xl text-xs font-semibold text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors"
-                          >
-                            דחייה
-                          </button>
-                        </div>
                       </GlassCard>
                     );
                   })
                 )}
               </div>
+              {!loading && selectedRow && (
+                <div className="shrink-0 px-4 py-3 border-t border-border bg-card flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={busyId === selectedRow.user_id}
+                    onClick={() => void act(selectedRow.user_id, 'active')}
+                    className="w-full py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50"
+                  >
+                    אישור לקהילה
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === selectedRow.user_id}
+                      onClick={() => void act(selectedRow.user_id, 'shadow')}
+                      className="py-2.5 rounded-xl text-xs font-semibold border border-border hover:bg-muted/60 disabled:opacity-50"
+                    >
+                      סביבה מבודדת
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === selectedRow.user_id}
+                      onClick={() => void act(selectedRow.user_id, 'blocked')}
+                      className="py-2.5 rounded-xl text-xs font-semibold text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50"
+                    >
+                      דחייה
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
