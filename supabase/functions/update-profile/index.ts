@@ -26,7 +26,15 @@ Deno.serve(async (req) => {
     }
     if (occupation !== undefined) updates.occupation = occupation;
     if (life_niche !== undefined) {
-      const allowed = new Set(["soldier_post_service", "post_big_trip", "student", "first_job"]);
+      const allowed = new Set([
+        "soldier_post_service",
+        "post_big_trip",
+        "student",
+        "first_job",
+        "soldier_active_service",
+        "discharged",
+        "business_world",
+      ]);
       const n = typeof life_niche === "string" ? life_niche.trim() : "";
       if (n.length > 0 && !allowed.has(n)) {
         return new Response(JSON.stringify({ error: "invalid life_niche" }), { status: 400, headers: corsHeaders });

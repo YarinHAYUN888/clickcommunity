@@ -7,6 +7,9 @@ export const LIFE_NICHE_OPTIONS = [
   { value: 'post_big_trip', label: '✈️ אחרי טיול גדול' },
   { value: 'student', label: '📚 סטודנט/ית' },
   { value: 'first_job', label: '💼 בעבודה הראשונה' },
+  { value: 'soldier_active_service', label: 'חייל בשירות צבאי🪖' },
+  { value: 'discharged', label: 'משוחרר✂️' },
+  { value: 'business_world', label: 'בעולם העסקים🤝' },
 ] as const;
 
 export type LifeNicheValue = (typeof LIFE_NICHE_OPTIONS)[number]['value'];

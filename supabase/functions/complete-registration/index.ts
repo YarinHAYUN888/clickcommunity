@@ -74,6 +74,9 @@ function buildProfilesUpsertRow(
     "post_big_trip",
     "student",
     "first_job",
+    "soldier_active_service",
+    "discharged",
+    "business_world",
   ]);
   if (niche && allowedNiche.has(niche)) row.life_niche = niche;
 
