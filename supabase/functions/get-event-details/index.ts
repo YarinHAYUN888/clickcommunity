@@ -37,26 +37,41 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get registration stats
+    let isSuperUser = false;
+    if (userId) {
+      const { data: viewerProfile } = await supabase
+        .from("profiles")
+        .select("super_role")
+        .eq("user_id", userId)
+        .maybeSingle();
+      isSuperUser = !!viewerProfile?.super_role;
+    }
+
     const { data: registrations } = await supabase
       .from("event_registrations")
       .select("user_id, status")
       .eq("event_id", event_id)
-      .in("status", ["registered"]);
-    const total = registrations?.length || 0;
+      .in("status", ["registered", "approved"]);
 
-    // Get gender breakdown from profiles
-    let femalePercent = 50, malePercent = 50;
-    if (registrations && registrations.length > 0) {
-      const userIds = registrations.map(r => r.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles").select("user_id, gender").in("user_id", userIds);
-      if (profiles) {
-        const females = profiles.filter(p => p.gender === "female").length;
-        const males = profiles.filter(p => p.gender === "male").length;
-        femalePercent = total > 0 ? Math.round((females / total) * 100) : 50;
-        malePercent = total > 0 ? Math.round((males / total) * 100) : 50;
+    let stats: { total: number; femalePercent: number; malePercent: number } | null = null;
+    if (isSuperUser) {
+      const total = registrations?.length || 0;
+      let femalePercent = 50;
+      let malePercent = 50;
+      if (registrations && registrations.length > 0) {
+        const regUserIds = registrations.map((r) => r.user_id);
+        const { data: genderProfiles } = await supabase
+          .from("profiles")
+          .select("user_id, gender")
+          .in("user_id", regUserIds);
+        if (genderProfiles) {
+          const females = genderProfiles.filter((p) => p.gender === "female").length;
+          const males = genderProfiles.filter((p) => p.gender === "male").length;
+          femalePercent = total > 0 ? Math.round((females / total) * 100) : 50;
+          malePercent = total > 0 ? Math.round((males / total) * 100) : 50;
+        }
       }
+      stats = { total, femalePercent, malePercent };
     }
 
     // User's registration
@@ -95,7 +110,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       event,
-      stats: { total, femalePercent, malePercent },
+      stats,
       userRegistration,
       attendees,
       host,

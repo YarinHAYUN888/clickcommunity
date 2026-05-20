@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { countRowsInCurrentJerusalemMonth } from '@/lib/jerusalemMonth';
+import { canViewEventParticipantStats } from '@/lib/eventPermissions';
 
 const DEFAULT_MONTHLY_EVENT_CAP = 3;
 
@@ -150,30 +151,43 @@ export async function getEventById(eventId: string): Promise<EventRow | null> {
   return data as EventRow;
 }
 
-export async function getEventStats(eventId: string): Promise<EventStats> {
-  const { data } = await supabase
-    .from('event_registrations')
-    .select('user_id, status')
-    .eq('event_id', eventId)
-    .in('status', ['registered', 'approved']);
+/** Returns null for non–super users (no client-side aggregate stats). */
+export async function getEventStats(eventId: string): Promise<EventStats | null> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) return null;
 
-  const total = data?.length || 0;
-  if (total === 0) return { total: 0, femalePercent: 50, malePercent: 50 };
-
-  const userIds = data!.map(r => r.user_id);
-  const { data: profiles } = await supabase
+  const { data: profile } = await supabase
     .from('profiles')
-    .select('user_id, gender')
-    .in('user_id', userIds);
+    .select('super_role')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
 
-  const females = profiles?.filter(p => p.gender === 'female').length || 0;
-  const males = profiles?.filter(p => p.gender === 'male').length || 0;
+  if (!canViewEventParticipantStats(profile?.super_role)) {
+    return null;
+  }
 
-  return {
-    total,
-    femalePercent: Math.round((females / total) * 100),
-    malePercent: Math.round((males / total) * 100),
-  };
+  const { data, error } = await supabase.functions.invoke('get-event-stats', {
+    body: { event_id: eventId },
+  });
+
+  if (error) {
+    const forbidden =
+      (data && typeof data === 'object' && (data as { error?: string }).error === 'Forbidden') ||
+      error.message?.includes('403');
+    if (forbidden) return null;
+    throw error;
+  }
+
+  if (data && typeof data === 'object' && 'error' in data) {
+    if ((data as { error?: string }).error === 'Forbidden') return null;
+    throw new Error(String((data as { message?: string }).message || (data as { error: string }).error));
+  }
+
+  const stats = data as EventStats | null;
+  if (!stats || typeof stats.total !== 'number') return null;
+  return stats;
 }
 
 export async function getUserRegistration(eventId: string, userId: string): Promise<EventRegistration | null> {
@@ -375,6 +389,34 @@ export async function getVotableAttendees(eventId: string, voterId: string) {
     .in('user_id', userIds);
 
   return profiles || [];
+}
+
+export class EventCancellationLockedError extends Error {
+  constructor() {
+    super('cancellation_locked');
+    this.name = 'EventCancellationLockedError';
+  }
+}
+
+export async function cancelEventRegistration(eventId: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase.functions.invoke('cancel-event-registration', {
+    body: { event_id: eventId },
+  });
+  const body = extractFunctionErrorBody(data, error);
+  if (body?.error === 'cancellation_locked') {
+    throw new EventCancellationLockedError();
+  }
+  if (error) {
+    const msg = typeof body?.message === 'string' ? body.message : error.message;
+    throw new Error(msg || 'Cancellation failed');
+  }
+  if (data && typeof data === 'object' && 'error' in data && !('success' in data && data.success === true)) {
+    throw new Error(String((data as { message?: string }).message || (data as { error: string }).error));
+  }
+  return data;
 }
 
 export async function registerForEvent(eventId: string) {

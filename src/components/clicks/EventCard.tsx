@@ -6,6 +6,8 @@ import GlassCard from './GlassCard';
 import StatusBadge from './StatusBadge';
 import { EventRow, getEventStats, getUserRegistration, EventStats, EventRegistration } from '@/services/events';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAdmin } from '@/contexts/AdminContext';
+import { canViewEventParticipantStats } from '@/lib/eventPermissions';
 import { springs } from '@/lib/motion';
 
 interface EventCardProps {
@@ -48,16 +50,23 @@ export default function EventCard({ event, index }: EventCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-50px' });
   const { authId } = useCurrentUser();
-  const [stats, setStats] = useState<EventStats>({ total: 0, femalePercent: 50, malePercent: 50 });
+  const { superRole } = useAdmin();
+  const canViewStats = canViewEventParticipantStats(superRole);
+  const [stats, setStats] = useState<EventStats | null>(null);
   const [registration, setRegistration] = useState<EventRegistration | null>(null);
   const countdown = useCountdown(event.date, event.time);
 
   useEffect(() => {
-    getEventStats(event.id).then(setStats).catch(console.error);
+    if (canViewStats) {
+      getEventStats(event.id).then(setStats).catch(console.error);
+    } else {
+      setStats(null);
+    }
     if (authId) getUserRegistration(event.id, authId).then(setRegistration).catch(console.error);
-  }, [event.id, authId]);
+  }, [event.id, authId, canViewStats]);
 
-  const capacityPercent = stats.total > 0 ? (stats.total / event.max_capacity) * 100 : 0;
+  const capacityPercent =
+    stats && stats.total > 0 ? (stats.total / event.max_capacity) * 100 : 0;
 
   const formatDate = (d: string) => {
     const date = new Date(d);
@@ -137,57 +146,56 @@ export default function EventCard({ event, index }: EventCardProps) {
             )}
           </div>
 
-          {/* Attendee Progress */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Users size={13} />
-                <span className="font-semibold">{stats.total}/{event.max_capacity} משתתפים</span>
+          {canViewStats && stats && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Users size={13} />
+                  <span className="font-semibold">{stats.total}/{event.max_capacity} משתתפים</span>
+                </div>
+                {capacityPercent > 0 && (
+                  <span className="font-bold text-gradient-premium text-[11px]">
+                    {Math.round(capacityPercent)}%
+                  </span>
+                )}
               </div>
-              {capacityPercent > 0 && (
-                <span className="font-bold text-gradient-premium text-[11px]">
-                  {Math.round(capacityPercent)}%
-                </span>
-              )}
-            </div>
-            <div className="relative h-2 rounded-full bg-secondary overflow-hidden">
-              <motion.div
-                className="relative h-full rounded-full"
-                style={{
-                  background: 'linear-gradient(90deg, #7C3AED, #9333EA, #EC4899)',
-                  boxShadow: '0 0 8px rgba(124,58,237,0.5)',
-                }}
-                initial={{ width: 0 }}
-                animate={inView ? { width: `${Math.min(capacityPercent, 100)}%` } : {}}
-                transition={{ duration: 0.8, ease: [0.2, 0.8, 0.2, 1], delay: 0.3 }}
-              />
-            </div>
-            {/* Gender Balance */}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>♀ {stats.femalePercent}% ♂ {stats.malePercent}%</span>
-              <div className="flex-1 h-1 rounded-full overflow-hidden bg-secondary">
+              <div className="relative h-2 rounded-full bg-secondary overflow-hidden">
                 <motion.div
-                  className="h-full rounded-full"
-                  style={{ background: 'linear-gradient(90deg, #EC4899, #A78BFA, #7C3AED)' }}
+                  className="relative h-full rounded-full"
+                  style={{
+                    background: 'linear-gradient(90deg, #7C3AED, #9333EA, #EC4899)',
+                    boxShadow: '0 0 8px rgba(124,58,237,0.5)',
+                  }}
                   initial={{ width: 0 }}
-                  animate={inView ? { width: `${stats.femalePercent}%` } : {}}
-                  transition={{ duration: 0.6, ease: 'easeOut', delay: 0.4 }}
+                  animate={inView ? { width: `${Math.min(capacityPercent, 100)}%` } : {}}
+                  transition={{ duration: 0.8, ease: [0.2, 0.8, 0.2, 1], delay: 0.3 }}
                 />
               </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>♀ {stats.femalePercent}% ♂ {stats.malePercent}%</span>
+                <div className="flex-1 h-1 rounded-full overflow-hidden bg-secondary">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ background: 'linear-gradient(90deg, #EC4899, #A78BFA, #7C3AED)' }}
+                    initial={{ width: 0 }}
+                    animate={inView ? { width: `${stats.femalePercent}%` } : {}}
+                    transition={{ duration: 0.6, ease: 'easeOut', delay: 0.4 }}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Reserved spots */}
-          {!isPast && event.reserved_new_spots > 0 && (
+          {canViewStats && !isPast && event.reserved_new_spots > 0 && (
             <p className="text-xs text-center text-primary bg-secondary px-3 py-1.5 rounded-lg">
               🆕 {event.reserved_new_spots} מקומות שמורים לחדשים
             </p>
           )}
 
           {/* CTA */}
-          {isPast ? (
+          {isPast && canViewStats && stats ? (
             <p className="text-sm text-center text-muted-foreground">היו {stats.total} משתתפים</p>
-          ) : (
+          ) : isPast ? null : (
             <EventCTAButton event={event} registration={registration} />
           )}
         </div>

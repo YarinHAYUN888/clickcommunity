@@ -6,9 +6,11 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAdmin } from '@/contexts/AdminContext';
+import { canViewEventParticipantStats } from '@/lib/eventPermissions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonner } from 'sonner';
@@ -18,13 +20,16 @@ export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { authId, role } = useCurrentUser();
+  const { superRole } = useAdmin();
+  const canViewStats = canViewEventParticipantStats(superRole);
   const [event, setEvent] = useState<EventRow | null>(null);
-  const [stats, setStats] = useState<EventStats>({ total: 0, femalePercent: 50, malePercent: 50 });
+  const [stats, setStats] = useState<EventStats | null>(null);
   const [attendees, setAttendees] = useState<any[]>([]);
   const [registration, setRegistration] = useState<EventRegistration | null>(null);
   const [photos, setPhotos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -37,7 +42,7 @@ export default function EventDetailPage() {
     if (!eventId) return;
     Promise.all([
       getEventById(eventId),
-      getEventStats(eventId),
+      canViewStats ? getEventStats(eventId) : Promise.resolve(null),
       getEventAttendees(eventId),
       getEventPhotos(eventId),
       authId ? getUserRegistration(eventId, authId) : Promise.resolve(null),
@@ -49,7 +54,7 @@ export default function EventDetailPage() {
       setRegistration(reg);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [eventId, authId]);
+  }, [eventId, authId, canViewStats]);
 
   useEffect(() => {
     if (role !== 'member' || !authId) {
@@ -76,6 +81,44 @@ export default function EventDetailPage() {
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
   }, [event]);
+
+  const canCancelRegistration = (() => {
+    if (!event || event.status === 'past') return false;
+    const active =
+      registration?.status === 'registered' ||
+      registration?.status === 'approved' ||
+      registration?.status === 'waitlist';
+    if (!active) return false;
+    const eventStart = new Date(`${event.date}T${event.time}`);
+    const lockAt = eventStart.getTime() - 5 * 60 * 60 * 1000;
+    return Date.now() < lockAt;
+  })();
+
+  const handleCancelRegistration = async () => {
+    if (!eventId) return;
+    setCancelling(true);
+    try {
+      await cancelEventRegistration(eventId);
+      setRegistration(null);
+      toast({ title: 'ההרשמה בוטלה' });
+      void getMyMonthlyEventRegistrationUsage().then(setMonthlyUsage);
+    } catch (err: unknown) {
+      if (err instanceof EventCancellationLockedError) {
+        toast({
+          title: 'לא ניתן לבטל',
+          description: 'לא ניתן לבטל הרשמה פחות מ-5 שעות לפני תחילת האירוע',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'שגיאה',
+          description: err instanceof Error ? err.message : 'נסו שוב',
+          variant: 'destructive',
+        });
+      }
+    }
+    setCancelling(false);
+  };
 
   const handleRegister = async () => {
     if (!eventId || !authId) return;
@@ -264,7 +307,10 @@ export default function EventDetailPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-base font-semibold text-muted-foreground flex items-center gap-2">
-              <Users size={16} /> מי מגיע? <span className="text-xs bg-secondary px-2 py-0.5 rounded-full">{stats.total}</span>
+              <Users size={16} /> מי מגיע?
+              {canViewStats && stats && (
+                <span className="text-xs bg-secondary px-2 py-0.5 rounded-full">{stats.total}</span>
+              )}
             </h3>
             {attendees.length > 0 && role !== 'guest' && (
               <button
@@ -361,7 +407,7 @@ export default function EventDetailPage() {
                         border: '2px dashed rgba(124,58,237,0.30)',
                       }}
                     >
-                      +{attendees.length - 15}
+                      {canViewStats ? `+${attendees.length - 15}` : '…'}
                     </div>
                     הצג הכל
                   </button>
@@ -405,29 +451,30 @@ export default function EventDetailPage() {
           />
         )}
 
-        {/* Attendee Stats */}
-        <GlassCard className="p-4 space-y-3">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground font-medium">{stats.total}/{event.max_capacity} משתתפים</span>
-          </div>
-          <div className="h-2 rounded-full bg-secondary overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-l from-primary to-accent"
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min((stats.total / event.max_capacity) * 100, 100)}%` }}
-              transition={{ duration: 0.8, ease: 'easeOut' }}
-            />
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>♀ {stats.femalePercent}% ♂ {stats.malePercent}%</span>
-            <div className="flex-1 h-1 rounded-full overflow-hidden bg-secondary">
-              <motion.div className="h-full" style={{ background: 'linear-gradient(90deg, #EC4899, #7C3AED)' }}
-                initial={{ width: 0 }} animate={{ width: `${stats.femalePercent}%` }}
-                transition={{ duration: 0.6, delay: 0.2 }}
+        {canViewStats && stats && (
+          <GlassCard className="p-4 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground font-medium">{stats.total}/{event.max_capacity} משתתפים</span>
+            </div>
+            <div className="h-2 rounded-full bg-secondary overflow-hidden">
+              <motion.div
+                className="h-full rounded-full bg-gradient-to-l from-primary to-accent"
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min((stats.total / event.max_capacity) * 100, 100)}%` }}
+                transition={{ duration: 0.8, ease: 'easeOut' }}
               />
             </div>
-          </div>
-        </GlassCard>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>♀ {stats.femalePercent}% ♂ {stats.malePercent}%</span>
+              <div className="flex-1 h-1 rounded-full overflow-hidden bg-secondary">
+                <motion.div className="h-full" style={{ background: 'linear-gradient(90deg, #EC4899, #7C3AED)' }}
+                  initial={{ width: 0 }} animate={{ width: `${stats.femalePercent}%` }}
+                  transition={{ duration: 0.6, delay: 0.2 }}
+                />
+              </div>
+            </div>
+          </GlassCard>
+        )}
 
         {/* Photo Gallery (past events) */}
         {isPast && photos.length > 0 && (
@@ -458,13 +505,37 @@ export default function EventDetailPage() {
               </p>
             )}
             {isRegistered ? (
-              <button className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-success/20 text-success" disabled>
-                רשום/ה ✓
-              </button>
+              <div className="space-y-2">
+                <button className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-success/20 text-success" disabled>
+                  רשום/ה ✓
+                </button>
+                {canCancelRegistration && (
+                  <button
+                    type="button"
+                    onClick={handleCancelRegistration}
+                    disabled={cancelling}
+                    className="w-full text-center text-sm text-destructive font-medium disabled:opacity-50"
+                  >
+                    {cancelling ? 'מבטל/ת...' : 'בטל/י הרשמה'}
+                  </button>
+                )}
+              </div>
             ) : registration?.status === 'waitlist' ? (
-              <button className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-warning/10 text-warning" disabled>
-                ברשימת המתנה (מקום {registration.waitlist_position})
-              </button>
+              <div className="space-y-2">
+                <button className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-warning/10 text-warning" disabled>
+                  ברשימת המתנה (מקום {registration.waitlist_position})
+                </button>
+                {canCancelRegistration && (
+                  <button
+                    type="button"
+                    onClick={handleCancelRegistration}
+                    disabled={cancelling}
+                    className="w-full text-center text-sm text-destructive font-medium disabled:opacity-50"
+                  >
+                    {cancelling ? 'מבטל/ת...' : 'בטל/י הרשמה'}
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 onClick={role === 'guest' ? () => navigate('/subscription') : handleRegister}
