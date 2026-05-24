@@ -30,7 +30,10 @@ function buildProfilesUpsertRow(
     updated_at: new Date().toISOString(),
     profile_completed: false,
     image_upload_status: "pending",
-    moderation_status: "pending",
+    role: "member",
+    moderation_status: "approved",
+    suitability_status: "active",
+    is_shadow: false,
   };
 
   if (firstName) row.first_name = firstName;

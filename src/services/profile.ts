@@ -1,6 +1,49 @@
 import { supabase } from '@/integrations/supabase/client';
 
+const UPLOAD_TIMEOUT_MS = 45_000;
+const UPLOAD_MAX_RETRIES = 2;
+
 const HEIC_MIME = new Set(['image/heic', 'image/heif', 'image/heif-sequence', 'image/heic-sequence']);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout:${label}`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+  });
+}
+
+/** Compress a data URL before storing in memory (Safari onboarding). */
+export async function compressDataUrlForUpload(dataUrl: string, maxDim = 1280, quality = 0.82): Promise<string> {
+  if (!dataUrl.startsWith('data:image/')) return dataUrl;
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const raw = new File([blob], 'compress-src.jpg', { type: blob.type || 'image/jpeg' });
+    const prepared = await downscaleImageFileIfLarge(raw, maxDim, quality);
+    if (prepared === raw && blob.size < 750_000) return dataUrl;
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(prepared);
+    });
+  } catch (e) {
+    console.warn('[compressDataUrlForUpload] skipped', e);
+    return dataUrl;
+  }
+}
 
 function looksLikeHeic(file: File | Blob, nameHint = ''): boolean {
   const t = (file.type || '').toLowerCase();
@@ -82,7 +125,8 @@ export async function getMyProfile(userId: string) {
       .upsert(
         {
           user_id: userId,
-          moderation_status: 'pending',
+          role: 'member',
+          moderation_status: 'approved',
           suitability_status: 'active',
           is_shadow: false,
           profile_completed: false,
@@ -170,39 +214,84 @@ export async function cancelSubscription(userId: string) {
   return data;
 }
 
+export type PhotoSlotResult = {
+  slot: number;
+  url?: string;
+  error?: string;
+};
+
+/** Upload one photo slot with retries; does not throw on failure. */
+export async function uploadPhotoSlot(
+  userId: string,
+  source: string | File,
+  index: number,
+): Promise<PhotoSlotResult> {
+  const projectUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? '';
+
+  if (typeof source === 'string') {
+    if (
+      projectUrl &&
+      (source.startsWith(`${projectUrl}/storage/`) || source.includes('/storage/v1/object/public/photos/'))
+    ) {
+      return { slot: index, url: source };
+    }
+    if (!source.startsWith('data:') && !source.startsWith('blob:')) {
+      return { slot: index, url: source };
+    }
+  }
+
+  let lastErr = '';
+  for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    try {
+      let file: File;
+      if (source instanceof File) {
+        file = await prepareImageFileForUpload(source, index);
+      } else {
+        const res = await fetch(source);
+        const blob = await res.blob();
+        const mime = blob.type || 'image/jpeg';
+        const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
+        const rawFile = new File([blob], `onboarding-${index}.${sub}`, { type: mime });
+        file = await prepareImageFileForUpload(rawFile, index);
+      }
+      const url = await withTimeout(
+        uploadProfilePhoto(userId, file, index),
+        UPLOAD_TIMEOUT_MS,
+        `photo-${index}`,
+      );
+      const ok = await verifyPublicPhotoUrl(url);
+      if (!ok) throw new Error('photo_url_not_reachable');
+      return { slot: index, url };
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e);
+      if (attempt < UPLOAD_MAX_RETRIES) await sleep(400 * (attempt + 1));
+    }
+  }
+  return { slot: index, error: lastErr || 'upload_failed' };
+}
+
+export async function verifyPublicPhotoUrl(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
 export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
   const validSources = sources.filter((s) => typeof s === 'string' && s.length > 0);
   console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
-  const projectUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? '';
   const out: string[] = [];
   const errors: { index: number; message: string }[] = [];
   for (let i = 0; i < validSources.length; i++) {
-    const s = validSources[i];
-    if (s.startsWith('data:') || s.startsWith('blob:')) {
-      try {
-        const res = await fetch(s);
-        const blob = await res.blob();
-        const mime = blob.type || 'image/jpeg';
-        const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
-        const rawFile = new File([blob], `onboarding-${i}.${sub}`, { type: mime });
-        const file = await prepareImageFileForUpload(rawFile, i);
-        out.push(await uploadProfilePhoto(userId, file, i));
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: i, message });
-        errors.push({ index: i, message });
-      }
-      continue;
+    const result = await uploadPhotoSlot(userId, validSources[i], i);
+    if (result.url) out.push(result.url);
+    else if (result.error) {
+      console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: i, message: result.error });
+      errors.push({ index: i, message: result.error });
     }
-    const isProjectPublic =
-      projectUrl &&
-      (s.startsWith(`${projectUrl}/storage/`) || s.includes('/storage/v1/object/public/photos/'));
-    if (isProjectPublic) {
-      out.push(s);
-      continue;
-    }
-    out.push(s);
   }
   console.info('[uploadOnboardingPhotosFromDataUrls] done', { userId, uploadedCount: out.length });
   if (validSources.length > 0 && out.length === 0) {
@@ -213,19 +302,26 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
 }
 
 export async function uploadProfilePhoto(userId: string, file: File, index: number) {
-  console.info('[uploadProfilePhoto] start', { userId, index, fileName: file.name, fileType: file.type, size: file.size });
-  if (!file.type.startsWith('image/')) {
+  const prepared = await prepareImageFileForUpload(file, index);
+  console.info('[uploadProfilePhoto] start', {
+    userId,
+    index,
+    fileName: prepared.name,
+    fileType: prepared.type,
+    size: prepared.size,
+  });
+  if (!prepared.type.startsWith('image/')) {
     throw new Error('invalid_image_type');
   }
-  if (file.size < 400) {
+  if (prepared.size < 400) {
     throw new Error('image_too_small');
   }
-  const fileExt = file.name.split('.').pop();
+  const fileExt = prepared.name.split('.').pop() || 'jpg';
   const filePath = `${userId}/${index}-${Date.now()}.${fileExt}`;
 
   const { error: uploadError } = await supabase.storage
     .from('photos')
-    .upload(filePath, file, { upsert: true });
+    .upload(filePath, prepared, { upsert: true, contentType: prepared.type || 'image/jpeg' });
 
   if (uploadError) {
     console.error('[uploadProfilePhoto] upload failed', { userId, index, filePath, error: uploadError.message });

@@ -68,20 +68,42 @@ Deno.serve(async (req) => {
     const row = data as Record<string, unknown>;
     const photosList = Array.isArray(row.photos) ? (row.photos as unknown[]) : [];
     const hasPhoto =
-      photosList.some((u) => typeof u === "string" && u.trim().length > 0) ||
-      (typeof row.avatar_url === "string" && row.avatar_url.trim().length > 0);
+      photosList.some((u) => typeof u === "string" && (u as string).trim().length > 0) ||
+      (typeof row.avatar_url === "string" && (row.avatar_url as string).trim().length > 0);
     const fn = typeof row.first_name === "string" ? row.first_name.trim() : "";
     const fnOk = fn.length >= 2;
     const interestsList = Array.isArray(row.interests) ? (row.interests as unknown[]) : [];
     const interestsOk = interestsList.length === 0 || interestsList.length >= 5;
+    const dob = row.date_of_birth;
+    const gender = typeof row.gender === "string" ? row.gender.trim() : "";
+    const niche = typeof row.life_niche === "string" ? row.life_niche.trim() : "";
+    const allowedNiche = new Set([
+      "soldier_post_service",
+      "post_big_trip",
+      "student",
+      "first_job",
+      "soldier_active_service",
+      "discharged",
+      "business_world",
+    ]);
+    const q = row.questionnaire_responses;
+    const hasQ =
+      q && typeof q === "object" && !Array.isArray(q) && Object.keys(q as Record<string, unknown>).length > 0;
+    const requiredOk =
+      fnOk &&
+      !!dob &&
+      gender.length > 0 &&
+      niche.length > 0 &&
+      allowedNiche.has(niche) &&
+      (interestsList.length >= 5 || hasQ);
 
     let finalData = data;
-    if (hasPhoto && fnOk && interestsOk) {
+    if (requiredOk && interestsOk) {
       const { data: data2, error: flagsErr } = await supabase
         .from("profiles")
         .update({
           profile_completed: true,
-          image_upload_status: "success",
+          image_upload_status: hasPhoto ? "success" : "pending",
         })
         .eq("user_id", user_id)
         .select("*")

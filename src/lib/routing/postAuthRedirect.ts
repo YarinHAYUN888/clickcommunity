@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { SupabaseProfile } from '@/hooks/useCurrentUser';
+import { hasRequiredOnboardingFields } from '@/lib/profileCompletion';
 
 export type PostAuthRoute = '/pending-review' | '/clicks' | '/blocked' | '/complete-profile';
 
@@ -13,6 +14,12 @@ export type ProfileRowForRedirect = Pick<
   | 'avatar_url'
   | 'photos'
   | 'suspended'
+  | 'first_name'
+  | 'date_of_birth'
+  | 'gender'
+  | 'life_niche'
+  | 'interests'
+  | 'questionnaire_responses'
 >;
 
 /** Human moderation cleared — even if suitability_status lags in DB */
@@ -51,21 +58,10 @@ function isBlockedOrRejected(p: ProfileRowForRedirect | SupabaseProfile | null):
 
 function needsCompleteProfile(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
   if (!p) return true;
-  if (p.profile_completed === true && p.image_upload_status !== 'failed') {
-    return false;
-  }
-  if (isModerationApproved(p) && (p.suitability_status === 'active' || p.suitability_status === 'shadow')) {
-    if (hasPersistedPhotos(p)) return false;
-  }
-  const imageBad = p.image_upload_status === 'failed';
-  const profileFlagIncomplete = p.profile_completed === false;
-  const imagePending = p.image_upload_status === 'pending';
-  if (hasPersistedPhotos(p) && !imageBad) {
-    return false;
-  }
-  if (profileFlagIncomplete || imageBad) return true;
-  if (imagePending && !hasPersistedPhotos(p)) return true;
-  return false;
+  if (hasRequiredOnboardingFields(p)) return false;
+  if (p.profile_completed === true) return false;
+  if (isModerationApproved(p) && hasPersistedPhotos(p)) return false;
+  return true;
 }
 
 /**
@@ -93,7 +89,7 @@ export async function resolvePostAuthRedirect(
   const { data: profile, error } = await supabase
     .from('profiles')
     .select(
-      'moderation_status, suitability_status, status, profile_completed, image_upload_status, avatar_url, photos, suspended',
+      'moderation_status, suitability_status, status, profile_completed, image_upload_status, avatar_url, photos, suspended, first_name, date_of_birth, gender, life_niche, interests, questionnaire_responses',
     )
     .eq('user_id', userId)
     .maybeSingle();

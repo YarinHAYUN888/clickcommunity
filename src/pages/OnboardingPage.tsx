@@ -11,7 +11,6 @@ import OnboardingProgress from '@/components/onboarding/OnboardingProgress';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import BackToLandingButton from '@/components/ui/BackToLandingButton';
 import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 import { claimSignupRewards, fetchReferrerPreview } from '@/services/points';
 import {
@@ -22,7 +21,8 @@ import {
 } from '@/services/otpDelivery';
 import { invokeCompleteRegistration } from '@/services/completeRegistration';
 import { runUserAnalysis } from '@/services/userSuitability';
-import { uploadOnboardingPhotosFromDataUrls } from '@/services/profile';
+import { compressDataUrlForUpload } from '@/services/profile';
+import { finalizeOnboardingProfile, type OnboardingDraft } from '@/services/profileSavePipeline';
 import { uploadVoiceIntroAfterProfile } from '@/services/voiceIntroUpload';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
@@ -56,81 +56,24 @@ const interestsList = [
   { emoji: '🏗️', label: 'אדריכלות' }, { emoji: '🎯', label: 'פיתוח אישי' },
 ];
 
-type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
-
-async function saveProfileToSupabase(
-  data: any,
-  userId: string,
-  opts?: { imageUploadStatus?: 'success' | 'failed' | 'pending' },
-): Promise<void> {
-  console.info('[saveProfileToSupabase] start', { userId });
-  const dob = data.dateOfBirth
-    ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
-    : null;
-
-  const photoList = Array.isArray(data.photos) ? (data.photos as string[]).filter((u) => typeof u === 'string' && u.length > 0) : [];
-  const resolvedImageStatus =
-    opts?.imageUploadStatus ?? (photoList.length > 0 ? 'success' : 'failed');
-
-  const profileData: ProfilesInsert = {
-    user_id: userId,
-    updated_at: new Date().toISOString(),
-    profile_completed: true,
-    image_upload_status: resolvedImageStatus,
-    moderation_status: 'pending',
+function onboardingDataToDraft(data: Record<string, unknown>): OnboardingDraft {
+  return {
+    firstName: data.firstName as string | undefined,
+    lastName: data.lastName as string | null | undefined,
+    phone: data.phone as string | undefined,
+    dateOfBirth: data.dateOfBirth as OnboardingDraft['dateOfBirth'],
+    gender: data.gender as string | undefined,
+    region: data.region as string | undefined,
+    regionOther: data.regionOther as string | null | undefined,
+    occupation: data.occupation as string | undefined,
+    life_niche: data.life_niche as string | undefined,
+    bio: data.bio as string | undefined,
+    instagram: data.instagram as string | null | undefined,
+    tiktok: data.tiktok as string | null | undefined,
+    interests: data.interests as string[] | undefined,
+    questionnaireResponses: data.questionnaireResponses as Record<string, unknown> | undefined,
+    photos: data.photos as string[] | undefined,
   };
-  if (data.firstName) profileData.first_name = data.firstName;
-  if (data.lastName !== undefined && data.lastName !== null) {
-    const ln = String(data.lastName).trim();
-    profileData.last_name = ln.length > 0 ? ln : null;
-  }
-  if (data.phone) profileData.phone = data.phone;
-  if (dob) profileData.date_of_birth = dob;
-  if (data.gender) profileData.gender = data.gender;
-  if (photoList.length > 0) {
-    profileData.photos = photoList;
-    profileData.avatar_url = photoList[0];
-  }
-  if (data.occupation) profileData.occupation = data.occupation;
-  if (data.life_niche && isValidLifeNiche(data.life_niche)) profileData.life_niche = data.life_niche;
-  if (data.bio !== undefined) profileData.bio = data.bio;
-  if (data.interests && data.interests.length > 0) profileData.interests = data.interests;
-  if (data.region) profileData.region = data.region;
-  if (data.regionOther !== undefined) profileData.region_other = data.regionOther || null;
-  if (data.instagram !== undefined) profileData.instagram = data.instagram || null;
-  if (data.tiktok !== undefined) profileData.tiktok = data.tiktok || null;
-  if (data.questionnaireResponses && Object.keys(data.questionnaireResponses).length > 0) {
-    profileData.questionnaire_responses = data.questionnaireResponses as ProfilesInsert['questionnaire_responses'];
-  }
-
-  let { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
-  if (error) {
-    const fallbackData: ProfilesInsert = {
-      ...profileData,
-      updated_at: new Date().toISOString(),
-    };
-    delete (fallbackData as Record<string, unknown>).profile_completed;
-    delete (fallbackData as Record<string, unknown>).image_upload_status;
-    delete (fallbackData as Record<string, unknown>).moderation_status;
-    const fallback = await supabase.from('profiles').upsert(fallbackData, { onConflict: 'user_id' });
-    error = fallback.error;
-  }
-  if (error) {
-    console.error('Profile upsert error:', error);
-    throw new Error('profile_save_failed');
-  }
-  const { error: flagsErr } = await supabase
-    .from('profiles')
-    .update({
-      profile_completed: true,
-      image_upload_status: resolvedImageStatus,
-      moderation_status: 'pending',
-    })
-    .eq('user_id', userId);
-  if (flagsErr && import.meta.env.DEV) {
-    console.warn('[saveProfileToSupabase] flags patch:', flagsErr.message);
-  }
-  console.info('[saveProfileToSupabase] success', { userId, hasAvatar: !!profileData.avatar_url, imageUpload: resolvedImageStatus });
 }
 
 export default function OnboardingPage() {
@@ -535,8 +478,14 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setPhotos(prev => { const next = [...prev]; next[index] = reader.result as string; return next; });
+    reader.onload = async () => {
+      const raw = reader.result as string;
+      const compressed = await compressDataUrlForUpload(raw);
+      setPhotos((prev) => {
+        const next = [...prev];
+        next[index] = compressed;
+        return next;
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -1055,51 +1004,52 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         ? photosDraftRef.current
         : (data.photos ?? []).filter((u: unknown) => typeof u === 'string' && u.length > 0);
 
+    const draft = onboardingDataToDraft(data as Record<string, unknown>);
     let profileSyncFailed = false;
+    let photoUrls: string[] = [];
     try {
-      console.info('[onboarding] photo upload start', { userId: uid, photoCount: onboardingPhotos.length });
-      const photoUrls = await uploadOnboardingPhotosFromDataUrls(uid, onboardingPhotos);
-      const imageUploadStatus: 'success' | 'failed' = photoUrls.length > 0 ? 'success' : 'failed';
-      await saveProfileToSupabase({ ...data, photos: photoUrls }, uid, { imageUploadStatus });
-      console.info('[onboarding] auth_and_profile_ok_voice_upload', { userId: uid });
-      await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
-      voiceIntroDraftRef.current = null;
-      photosDraftRef.current = [];
-      try {
-        await runUserAnalysis(
-          {
-            firstName: data.firstName,
-            lastName: data.lastName,
-            bio: data.bio,
-            occupation: data.occupation,
-            interests: data.interests,
-            region: data.region,
-            regionOther: data.regionOther,
-            instagram: data.instagram,
-            tiktok: data.tiktok,
-            gender: data.gender,
-            photos: photoUrls,
-            questionnaireResponses: data.questionnaireResponses,
-          },
-          uid,
-        );
-      } catch (analysisErr) {
-        console.error('runUserAnalysis failed:', analysisErr);
+      const result = await finalizeOnboardingProfile(uid, draft, onboardingPhotos);
+      profileSyncFailed = result.profileSyncFailed;
+      photoUrls = result.photoUrls;
+      if (onboardingPhotos.length > 0 && photoUrls.length === 0) {
+        throw new Error('photo_upload_failed');
       }
     } catch (e) {
-      console.error('Profile or photo upload failed:', e);
-      await supabase
-        .from('profiles')
-        .update({
-          profile_completed: false,
-          image_upload_status: 'failed',
-          ai_summary: 'Profile sync failed after auth creation',
-        })
-        .eq('user_id', uid);
+      console.error('[onboarding] finalize profile failed:', e);
       if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
         throw new Error('photo_upload_failed');
       }
       profileSyncFailed = true;
+    }
+
+    try {
+      await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
+      voiceIntroDraftRef.current = null;
+      photosDraftRef.current = [];
+    } catch (voiceErr) {
+      console.error('voice upload failed:', voiceErr);
+    }
+
+    try {
+      await runUserAnalysis(
+        {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          bio: data.bio,
+          occupation: data.occupation,
+          interests: data.interests,
+          region: data.region,
+          regionOther: data.regionOther,
+          instagram: data.instagram,
+          tiktok: data.tiktok,
+          gender: data.gender,
+          photos: photoUrls,
+          questionnaireResponses: data.questionnaireResponses,
+        },
+        uid,
+      );
+    } catch (analysisErr) {
+      console.error('runUserAnalysis failed:', analysisErr);
     }
 
     const refRaw =

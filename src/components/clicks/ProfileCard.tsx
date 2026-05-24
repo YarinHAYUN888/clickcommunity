@@ -7,6 +7,7 @@ import InterestPill from './InterestPill';
 import CompatibilityArc from './CompatibilityArc';
 import { SupabaseProfile } from '@/hooks/useCurrentUser';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
+import { lifeNicheLabel } from '@/data/lifeNiche';
 import { toast } from 'sonner';
 import PremiumButton from '@/components/ui/PremiumButton';
 import { springs } from '@/lib/motion';
@@ -52,6 +53,8 @@ export default function ProfileCard({
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: '-50px' });
   const [arcVisible, setArcVisible] = useState(false);
+  const [photoBroken, setPhotoBroken] = useState(false);
+  const [photoLoaded, setPhotoLoaded] = useState(false);
 
   useEffect(() => {
     if (isInView) {
@@ -79,7 +82,12 @@ export default function ProfileCard({
     void onSwipe(action);
   };
 
-  const photoSrc = profile.photos?.[0] || profile.avatar_url || '';
+  const photoSrc = !photoBroken ? (profile.photos?.[0] || profile.avatar_url || '') : '';
+  const nicheLabel = lifeNicheLabel(profile.life_niche);
+  const personalityLine =
+    matchEnrichment?.match?.compatibility_reason ||
+    matchEnrichment?.match?.ai_summary ||
+    (profile.ai_summary ? String(profile.ai_summary).slice(0, 120) : '');
   const allInterestsArr = profile.interests || [];
   const nonShared = allInterestsArr.filter(i => !sharedInterests.includes(i));
 
@@ -128,13 +136,23 @@ export default function ProfileCard({
             </div>
           )}
           {photoSrc ? (
-            <motion.img
-              src={photoSrc}
-              alt={profile.first_name || ''}
-              className="w-full h-full object-cover"
-              animate={{ scale: [1, 1.03, 1] }}
-              transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-            />
+            <>
+              {!photoLoaded && (
+                <div className="absolute inset-0 bg-muted animate-pulse" aria-hidden />
+              )}
+              <motion.img
+                src={photoSrc}
+                alt={profile.first_name || ''}
+                className="w-full h-full object-cover"
+                onLoad={() => setPhotoLoaded(true)}
+                onError={() => {
+                  setPhotoBroken(true);
+                  setPhotoLoaded(true);
+                }}
+                animate={{ scale: [1, 1.03, 1] }}
+                transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            </>
           ) : (
             <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground text-4xl">
               👤
@@ -158,6 +176,9 @@ export default function ProfileCard({
                 {age ? `, ${age}` : ''}
               </h3>
             </div>
+            {nicheLabel && (
+              <p className="text-white/85 text-[12px] mt-0.5 font-medium">{nicheLabel}</p>
+            )}
             {profile.occupation && (
               <p className="text-white/75 text-[13px] mt-0.5">{profile.occupation}</p>
             )}
@@ -166,6 +187,9 @@ export default function ProfileCard({
 
         {/* Info section */}
         <div className="p-4 space-y-4">
+          {personalityLine && (
+            <p className="text-sm text-muted-foreground leading-snug line-clamp-2">{personalityLine}</p>
+          )}
           {/* Interests */}
           {(sharedInterests.length > 0 || nonShared.length > 0) && (
             <div className="flex flex-wrap gap-1.5">

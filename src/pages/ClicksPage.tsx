@@ -213,9 +213,9 @@ export default function ClicksPage() {
                 <Heart size={42} className="relative text-primary" fill="currentColor" />
               </div>
               <p className="text-[24px] text-h1-premium text-foreground">עוד אין קליקים</p>
-              <p className="text-[15px] text-muted-foreground mt-2 max-w-[280px] mx-auto leading-relaxed">
-                ברגע שמשתמשים מתאימים (פעילים באותו עולם קהילה) עם תמונה בפרופיל יופיעו כאן.
-                משתמשים שממתינים לאישור מנהל לא נכללים בפיד עד לאישור.
+              <p className="text-[15px] text-muted-foreground mt-2 max-w-[300px] mx-auto leading-relaxed">
+                נחפש קודם אנשים באותה תחום חיים ועם עניינים משותפים, ואז נרחיב בהדרגה.
+                ודאו שיש לכם תמונה בפרופיל ושהפרופיל הושלם.
               </p>
             </motion.div>
           ) : (

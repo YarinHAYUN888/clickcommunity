@@ -5,7 +5,7 @@ import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import InterestPill from '@/components/clicks/InterestPill';
 import { supabase } from '@/integrations/supabase/client';
-import { getMyProfile, updateProfile, uploadProfilePhoto, deleteProfilePhoto } from '@/services/profile';
+import { getMyProfile, updateProfile, uploadPhotoSlot, deleteProfilePhoto } from '@/services/profile';
 import { allInterests } from '@/data/demo';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
@@ -109,14 +109,18 @@ export default function EditProfilePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const url = await uploadProfilePhoto(authId, file, uploadSlot);
+      const result = await uploadPhotoSlot(authId, file, uploadSlot);
+      if (!result.url) {
+        toast.error(result.error ? `שגיאה בהעלאת תמונה: ${result.error}` : 'שגיאה בהעלאת תמונה');
+        return;
+      }
       setPhotos(prev => {
         const next = [...prev];
-        if (uploadSlot < next.length) next[uploadSlot] = url;
-        else next.push(url);
+        if (uploadSlot < next.length) next[uploadSlot] = result.url!;
+        else next.push(result.url!);
         return next;
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error('שגיאה בהעלאת תמונה');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
