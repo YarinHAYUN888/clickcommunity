@@ -73,7 +73,6 @@ function buildProfilesUpsertRow(
 
   const niche = normalizeString(p.lifeNiche);
   const allowedNiche = new Set([
-    "soldier_post_service",
     "post_big_trip",
     "student",
     "first_job",
@@ -100,6 +99,62 @@ function buildProfilesUpsertRow(
   }
 
   return row;
+}
+
+async function findUserIdByEmail(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<string | null> {
+  const target = email.toLowerCase();
+  const perPage = 1000;
+  for (let page = 1; page <= 5; page++) {
+    const { data: listed, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) {
+      console.error("complete-registration listUsers:", error);
+      return null;
+    }
+    const users = listed?.users ?? [];
+    const hit = users.find((u) => (u.email ?? "").toLowerCase() === target);
+    if (hit?.id) return hit.id;
+    if (users.length < perPage) break;
+  }
+  return null;
+}
+
+/** Promote guest → community member without overwriting profile fields. */
+async function promoteGuestToMemberIfNeeded(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<void> {
+  const { data: row, error: fetchErr } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (fetchErr) {
+    console.error("complete-registration promote fetch:", fetchErr);
+    return;
+  }
+  const currentRole = row?.role ?? null;
+  if (currentRole === "member") return;
+  if (currentRole !== "guest" && currentRole !== null) return;
+
+  const { error: updateErr } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      role: "member",
+      moderation_status: "approved",
+      suitability_status: "active",
+      is_shadow: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId);
+  if (updateErr) {
+    console.error("complete-registration promote update:", updateErr);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -145,6 +200,7 @@ Deno.serve(async (req) => {
         return json({ error: createError.message, diagnostics: { stage: "create_user" } }, 400);
       }
       code = "already_exists";
+      userId = await findUserIdByEmail(supabaseAdmin, email);
     } else {
       userId = createdUser.user?.id ?? null;
     }
@@ -169,6 +225,10 @@ Deno.serve(async (req) => {
           500,
         );
       }
+    }
+
+    if (code === "already_exists" && userId) {
+      await promoteGuestToMemberIfNeeded(supabaseAdmin, userId);
     }
 
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({

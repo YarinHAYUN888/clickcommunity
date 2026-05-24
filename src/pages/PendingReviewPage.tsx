@@ -1,21 +1,44 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
+import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import { Loader2, ShieldCheck, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function PendingReviewPage() {
   const navigate = useNavigate();
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session && !cancelled) navigate('/', { replace: true });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        if (!cancelled) navigate('/', { replace: true });
+        return;
+      }
+      const { route } = await resolvePostAuthRedirect(session.user.id);
+      if (cancelled) return;
+      if (route === '/clicks') {
+        notifyProfileUpdated(session.user.id);
+        navigate('/clicks', { replace: true });
+        return;
+      }
+      if (route === '/blocked') {
+        navigate('/blocked', { replace: true });
+        return;
+      }
+      if (route === '/complete-profile') {
+        navigate('/complete-profile', { replace: true });
+        return;
+      }
+      setBooting(false);
     })();
     return () => {
       cancelled = true;
@@ -53,6 +76,10 @@ export default function PendingReviewPage() {
   async function signOut() {
     await supabase.auth.signOut();
     navigate('/', { replace: true });
+  }
+
+  if (booting) {
+    return <SpinnerOverlay label="טוען..." />;
   }
 
   return (

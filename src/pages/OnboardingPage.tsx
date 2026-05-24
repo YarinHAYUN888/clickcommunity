@@ -19,11 +19,21 @@ import {
   generateNumericOtp,
   syncOtpToWebhook,
 } from '@/services/otpDelivery';
-import { invokeCompleteRegistration } from '@/services/completeRegistration';
-import { runUserAnalysis } from '@/services/userSuitability';
+import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
+import {
+  classifyOtpWebhookFailure,
+  clearPendingOtp,
+  errorCodeFromMessage,
+  getHebrewOnboardingMessage,
+  persistPendingOtp,
+  readPendingOtp,
+} from '@/lib/onboarding/onboardingErrors';
+import {
+  runPostOtpRegistration,
+  tryRecoverSessionAfterFailure,
+} from '@/services/completeOnboardingAuth';
 import { compressDataUrlForUpload } from '@/services/profile';
 import { finalizeOnboardingProfile, type OnboardingDraft } from '@/services/profileSavePipeline';
-import { uploadVoiceIntroAfterProfile } from '@/services/voiceIntroUpload';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
 type Step = typeof steps[number];
@@ -599,7 +609,7 @@ function AboutStep({ data, updateData, onNext }: { data: any; updateData: any; o
             border: `1px solid ${touched && !nicheValid ? 'hsl(0 84% 60%)' : nicheValid ? 'hsl(160 84% 39%)' : 'hsl(var(--border))'}`,
           }}
         >
-          <option value="">בחר/י את המסלול הקרוב אליך</option>
+          <option value="">מה הכי מתאר אותך כרגע?</option>
           {LIFE_NICHE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -864,15 +874,16 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   );
   const [codeSent, setCodeSent] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const [otpError, setOtpError] = useState('');
+  const [verifyError, setVerifyError] = useState('');
   const [shakeOtp, setShakeOtp] = useState(false);
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [postAuthBusy, setPostAuthBusy] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
-  const [error, setError] = useState('');
+  const [sendError, setSendError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const generatedCodeRef = useRef<string>('');
+  const generatedCodeRef = useRef<string>(readPendingOtp() ?? '');
+  const lastRegistrationCodeRef = useRef<'created' | 'already_exists' | undefined>(undefined);
 
   useEffect(() => {
     if (data.verificationMethod === 'phone' || data.verificationMethod === 'email') {
@@ -899,17 +910,34 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         data: { session },
       } = await supabase.auth.getSession();
       if (!session?.user || cancelled) return;
+
+      try {
+        const saved = localStorage.getItem('clicks_onboarding');
+        if (saved) {
+          const parsed = JSON.parse(saved) as Record<string, unknown>;
+          const draft = onboardingDataToDraft(parsed);
+          const storedPhotos = (parsed.photos as string[] | undefined)?.filter(
+            (u) => typeof u === 'string' && u.length > 0,
+          );
+          const photoSources =
+            photosDraftRef.current.length > 0
+              ? photosDraftRef.current
+              : storedPhotos ?? [];
+          await finalizeOnboardingProfile(session.user.id, draft, photoSources);
+        }
+      } catch (e) {
+        console.warn('[VerifyStep] session restore finalize skipped', e);
+      }
+
       const { route } = await resolvePostAuthRedirect(session.user.id);
       if (cancelled) return;
-      if (import.meta.env.DEV) {
-        console.info('[VerifyStep] session restore — skip OTP, redirect', route);
-      }
+      logOnboardingStep(8, { route, reason: 'session_restore' });
       navigate(route, { replace: true });
     })();
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, photosDraftRef]);
 
   const phoneClean = (() => {
     const fromData = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
@@ -950,143 +978,43 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const completeRegistration = useCallback(async (): Promise<{ profileSyncFailed: boolean; userId: string }> => {
+  const buildPostOtpInputs = useCallback(() => {
     const password = data.password?.trim();
     const email = data.email?.trim().toLowerCase();
-
     if (!password || !email) {
       throw new Error('missing_credentials');
     }
-
-    const { tokenHash } = await invokeCompleteRegistration({
-      email,
-      password,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      referralCode: data.referralCode?.trim() || undefined,
-      profile: {
-        phone: data.phone,
-        dateOfBirth: data.dateOfBirth,
-        gender: data.gender,
-        region: data.region,
-        regionOther: data.regionOther,
-        occupation: data.occupation,
-        lifeNiche: data.life_niche,
-        bio: data.bio,
-        instagram: data.instagram,
-        tiktok: data.tiktok,
-        interests: data.interests,
-      },
-    });
-
-    await supabase.auth.signOut({ scope: 'local' });
-
-    const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: 'magiclink',
-    });
-
-    if (verifyErr || !verifyData.user) {
-      console.error('verifyOtp after complete-registration failed:', verifyErr);
-      throw new Error('session_creation_failed');
-    }
-
-    const {
-      data: { session: activeSession },
-    } = await supabase.auth.getSession();
-    if (!activeSession?.user) {
-      throw new Error('session_creation_failed');
-    }
-
-    const uid = verifyData.user.id;
     const onboardingPhotos =
       photosDraftRef.current.length > 0
         ? photosDraftRef.current
         : (data.photos ?? []).filter((u: unknown) => typeof u === 'string' && u.length > 0);
-
     const draft = onboardingDataToDraft(data as Record<string, unknown>);
-    let profileSyncFailed = false;
-    let photoUrls: string[] = [];
-    try {
-      const result = await finalizeOnboardingProfile(uid, draft, onboardingPhotos);
-      profileSyncFailed = result.profileSyncFailed;
-      photoUrls = result.photoUrls;
-      if (onboardingPhotos.length > 0 && photoUrls.length === 0) {
-        throw new Error('photo_upload_failed');
-      }
-    } catch (e) {
-      console.error('[onboarding] finalize profile failed:', e);
-      if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
-        throw new Error('photo_upload_failed');
-      }
-      profileSyncFailed = true;
-    }
-
-    try {
-      await uploadVoiceIntroAfterProfile(uid, voiceIntroDraftRef.current);
-      voiceIntroDraftRef.current = null;
-      photosDraftRef.current = [];
-    } catch (voiceErr) {
-      console.error('voice upload failed:', voiceErr);
-    }
-
-    try {
-      await runUserAnalysis(
-        {
-          firstName: data.firstName,
-          lastName: data.lastName,
-          bio: data.bio,
-          occupation: data.occupation,
-          interests: data.interests,
-          region: data.region,
-          regionOther: data.regionOther,
-          instagram: data.instagram,
-          tiktok: data.tiktok,
-          gender: data.gender,
-          photos: photoUrls,
-          questionnaireResponses: data.questionnaireResponses,
-        },
-        uid,
-      );
-    } catch (analysisErr) {
-      console.error('runUserAnalysis failed:', analysisErr);
-    }
-
-    const refRaw =
-      data.referralCode?.trim() ||
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('clicks_ref_code') : null);
-    try {
-      await claimSignupRewards(refRaw || undefined);
-      try {
-        localStorage.removeItem('clicks_ref_code');
-      } catch {
-        /* ignore */
-      }
-    } catch (e) {
-      console.warn('claim-signup-rewards:', e);
-    }
-    return { profileSyncFailed, userId: uid };
-  }, [data, voiceIntroDraftRef, photosDraftRef]);
+    return {
+      password,
+      email,
+      onboardingPhotos,
+      draft,
+    };
+  }, [data, photosDraftRef]);
 
   const handleSendCode = useCallback(async () => {
     if (!method) return;
-    setError('');
+    setSendError('');
     if (method === 'phone' && !phoneLooksValid) {
-      setError('נדרש מספר טלפון ישראלי תקין. חזרו לשלב יצירת החשבון.');
+      setSendError('נדרש מספר טלפון ישראלי תקין. חזרו לשלב יצירת החשבון.');
       return;
     }
     setSending(true);
 
     try {
-      // 1. קוד חדש בכל שליחה | 2. שמירה ב-ref לפני הרשת | 3. סנכרון ל-webhook
       const newCode = generateNumericOtp();
       generatedCodeRef.current = newCode;
+      persistPendingOtp(newCode);
       const payload = buildOtpWebhookPayload(data, method, newCode);
       const result = await syncOtpToWebhook(payload);
-      if (import.meta.env.DEV) console.log('n8n OTP webhook:', result.ok ? 'ok' : 'fail', result.status, result.error ?? '');
 
       if (!result.ok) {
-        setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
+        setSendError(getHebrewOnboardingMessage(classifyOtpWebhookFailure(result)));
         setSending(false);
         return;
       }
@@ -1095,13 +1023,14 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
       }
 
+      setSendError('');
       setCodeSent(true);
       setResendTimer(60);
       updateData({ verificationMethod: method });
       setTimeout(() => inputRefs.current[0]?.focus(), 350);
     } catch (e) {
       console.error('Send code exception:', e);
-      setError('שגיאה בשליחת קוד האימות. נסה/י שוב.');
+      setSendError(getHebrewOnboardingMessage('otp_webhook_network'));
     }
     setSending(false);
   }, [method, updateData, data, phoneLooksValid]);
@@ -1112,7 +1041,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       const newOtp = [...otp];
       digits.forEach((d, i) => { if (index + i < 6) newOtp[index + i] = d; });
       setOtp(newOtp);
-      setOtpError('');
+      setVerifyError('');
       const nextIdx = Math.min(index + digits.length, 5);
       inputRefs.current[nextIdx]?.focus();
       if (newOtp.every(d => d !== '')) verifyOtp(newOtp.join(''));
@@ -1122,7 +1051,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     const newOtp = [...otp];
     newOtp[index] = digit;
     setOtp(newOtp);
-    setOtpError('');
+    setVerifyError('');
     if (digit && index < 5) inputRefs.current[index + 1]?.focus();
     if (newOtp.every(d => d !== '')) verifyOtp(newOtp.join(''));
   };
@@ -1140,50 +1069,117 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     if (code.length !== 6 || verifying || postAuthBusy) return;
     setVerifying(true);
     try {
-      if (code !== generatedCodeRef.current) {
-        setOtpError('קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.');
+      const expected =
+        generatedCodeRef.current || readPendingOtp() || '';
+      if (!expected || code !== expected) {
+        setVerifyError(getHebrewOnboardingMessage('otp_code_invalid'));
         setShakeOtp(true);
         setOtp(['', '', '', '', '', '']);
         setTimeout(() => inputRefs.current[0]?.focus(), 350);
         return;
       }
 
+      logOnboardingStep(3, { method });
       setPostAuthBusy(true);
-      const result = await completeRegistration();
-      console.log("OTP verified successfully");
-      const { route, profile: loadedProfile } = await resolvePostAuthRedirect(result.userId);
-      console.log("Loaded profile after OTP:", loadedProfile);
-      console.log("Redirecting after OTP:", route);
+
+      const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
+
+      const result = await runPostOtpRegistration({
+        registrationBody: {
+          email,
+          password,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          referralCode: data.referralCode?.trim() || undefined,
+          profile: {
+            phone: data.phone,
+            dateOfBirth: data.dateOfBirth,
+            gender: data.gender,
+            region: data.region,
+            regionOther: data.regionOther,
+            occupation: data.occupation,
+            lifeNiche: data.life_niche,
+            bio: data.bio,
+            instagram: data.instagram,
+            tiktok: data.tiktok,
+            interests: data.interests,
+          },
+        },
+        draft,
+        photoSources: onboardingPhotos,
+        voiceBlob: voiceIntroDraftRef.current,
+        analysisPayload: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          bio: data.bio,
+          occupation: data.occupation,
+          interests: data.interests,
+          region: data.region,
+          regionOther: data.regionOther,
+          instagram: data.instagram,
+          tiktok: data.tiktok,
+          gender: data.gender,
+          photos: [],
+          questionnaireResponses: data.questionnaireResponses,
+        },
+        referralCode: data.referralCode,
+      });
+
+      lastRegistrationCodeRef.current = result.registrationCode;
+      voiceIntroDraftRef.current = null;
+      photosDraftRef.current = [];
+      clearPendingOtp();
+
       if (result.profileSyncFailed) {
-        toast.warning('החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.');
+        toast.warning(getHebrewOnboardingMessage('onboarding_finalize_partial'));
+      } else if (
+        onboardingPhotos.length > 0 &&
+        result.photoUrls.length === 0 &&
+        result.imageUploadStatus !== 'success'
+      ) {
+        toast.warning(getHebrewOnboardingMessage('photo_upload_partial'));
       }
-      if (route === '/clicks' || route === '/pending-review') notifyProfileUpdated(result.userId);
+
+      if (result.route === '/clicks' || result.route === '/pending-review') {
+        notifyProfileUpdated(result.userId);
+      }
       void supabase.functions.invoke('analyze-profile-personality', { body: {} }).catch(() => undefined);
-      navigate(route, { replace: true });
+      navigate(result.route, { replace: true });
       clearData();
     } catch (e) {
       setPostAuthBusy(false);
       console.error('Verify exception:', e);
-      if (e instanceof Error && 'cause' in e && e.cause !== undefined) {
-        console.error('Verify exception cause:', e.cause);
-      }
-      if (e instanceof Error && e.message === 'missing_credentials') {
-        setOtpError('חסרים פרטי הרשמה. חזרו להתחלה ונסו שוב.');
-      } else if (e instanceof Error && e.message === 'session_token_missing') {
-        setOtpError('לא הצלחנו ליצור חיבור מאובטח. נסה/י שוב.');
-      } else if (e instanceof Error && e.message === 'registration_failed') {
-        setOtpError('השרת לא הצליח ליצור את החשבון. נסה/י שוב או בדקו את החיבור לסופאבייס.');
-      } else if (e instanceof Error && e.message === 'session_creation_failed') {
-        setOtpError('החשבון נוצר אך ההתחברות נכשלה. נסה/י להתחבר עם האימייל והסיסמה.');
-      } else if (e instanceof Error && e.message === 'profile_save_failed') {
-        setOtpError('לא הצלחנו לשמור את פרטי הפרופיל או התמונות. נסה/י שוב.');
-      } else if (e instanceof Error && e.message === 'photo_upload_failed') {
-        setOtpError(
-          'החשבון נוצר אך התמונות לא נשמרו. נסה/י שוב, או הוסף/י תמונות מעמוד הפרופיל אחרי ההתחברות.',
+
+      try {
+        const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
+        const recovery = await tryRecoverSessionAfterFailure(
+          draft,
+          onboardingPhotos,
+          email,
+          password,
+          lastRegistrationCodeRef.current,
         );
-      } else {
-        setOtpError('שגיאה ביצירת החשבון. נסה/י שוב.');
+        if (recovery.recovered) {
+          clearPendingOtp();
+          voiceIntroDraftRef.current = null;
+          photosDraftRef.current = [];
+          if (recovery.profileSyncFailed) {
+            toast.warning(getHebrewOnboardingMessage('onboarding_finalize_partial'));
+          }
+          if (recovery.route === '/clicks' || recovery.route === '/pending-review') {
+            notifyProfileUpdated(recovery.userId);
+          }
+          navigate(recovery.route, { replace: true });
+          clearData();
+          return;
+        }
+      } catch (recoveryErr) {
+        console.warn('[VerifyStep] recovery failed', recoveryErr);
       }
+
+      const code =
+        e instanceof Error ? errorCodeFromMessage(e.message) : 'unknown';
+      setVerifyError(getHebrewOnboardingMessage(code));
     } finally {
       setVerifying(false);
     }
@@ -1191,38 +1187,40 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
   const handlePasteFromClipboard = async () => {
     if (verifying || postAuthBusy) return;
-    setOtpError('');
+    setVerifyError('');
     try {
       const text = await navigator.clipboard.readText();
       const six = extractSixDigitCode(text);
       if (!six) {
-        setOtpError('לא נמצאו 6 ספרות בלוח. העתק/י את הקוד מהמייל והנסה שוב.');
+        setVerifyError('לא נמצאו 6 ספרות בלוח. העתק/י את הקוד מהמייל והנסה שוב.');
         return;
       }
       const arr = six.split('');
       setOtp(arr);
       void verifyOtp(six);
     } catch {
-      setOtpError('לא ניתן לקרוא מהלוח. הדבק/י ידנית בשדות או אשר/י גישה ללוח.');
+      setVerifyError('לא ניתן לקרוא מהלוח. הדבק/י ידנית בשדות או אשר/י גישה ללוח.');
     }
   };
 
   const handleResend = async () => {
+    if (method !== 'email' && method !== 'phone') return;
     if (method === 'phone' && !phoneLooksValid) {
-      setOtpError('נדרש מספר טלפון מלא. חזרו לשלב יצירת החשבון.');
+      setVerifyError('נדרש מספר טלפון מלא. חזרו לשלב יצירת החשבון.');
       return;
     }
     setOtp(['', '', '', '', '', '']);
-    setOtpError('');
+    setVerifyError('');
     setResendTimer(60);
     try {
       const newCode = generateNumericOtp();
       generatedCodeRef.current = newCode;
+      persistPendingOtp(newCode);
       const payload = buildOtpWebhookPayload(data, method, newCode);
       const result = await syncOtpToWebhook(payload);
       if (!result.ok) {
         console.error('Resend error:', result);
-        setOtpError('שליחת הקוד נכשלה.');
+        setVerifyError(getHebrewOnboardingMessage(classifyOtpWebhookFailure(result)));
       } else {
         if (import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true') {
           toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
@@ -1231,7 +1229,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       }
     } catch (e) {
       console.error('Resend exception:', e);
-      setOtpError('שגיאה בשליחה חוזרת.');
+      setVerifyError(getHebrewOnboardingMessage('otp_webhook_network'));
     }
   };
 
@@ -1281,8 +1279,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
           })}
         </div>
 
-        {error && (
-          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[13px] text-destructive">{error}</motion.p>
+        {sendError && (
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[13px] text-destructive">{sendError}</motion.p>
         )}
 
         <StickyButton disabled={!method || sending} onClick={handleSendCode} label={sending ? '⏳ שולח...' : 'שלח קוד אימות'} />
@@ -1313,7 +1311,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
               value={digit} onChange={e => handleOtpChange(i, e.target.value)} onKeyDown={e => handleOtpKeyDown(i, e)}
               disabled={verifying || postAuthBusy}
               className="w-12 h-14 rounded-xl text-center text-2xl font-semibold outline-none transition-all disabled:opacity-50"
-              style={{ background: 'hsl(var(--card))', border: `1px solid ${otpError ? 'hsl(0 84% 60%)' : 'hsl(var(--border))'}` }} />
+              style={{ background: 'hsl(var(--card))', border: `1px solid ${verifyError ? 'hsl(0 84% 60%)' : 'hsl(var(--border))'}` }} />
             {allEmpty && !digit && <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none skeleton-shimmer" />}
           </div>
         ))}
@@ -1336,7 +1334,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         {method === 'email' ? '📧 הדבק מהמייל' : '📱 הדבק מהטלפון'}
       </motion.button>
 
-      {otpError && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-[13px] text-destructive">{otpError}</motion.p>}
+      {verifyError && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-[13px] text-destructive">{verifyError}</motion.p>}
       {verifying && <p className="text-center text-sm text-muted-foreground">⏳ מאמת...</p>}
 
       <div className="text-center">

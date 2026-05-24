@@ -306,7 +306,7 @@ export default function EditProfilePage() {
             onChange={(e) => setLifeNiche(e.target.value)}
             className="w-full h-11 rounded-xl bg-muted px-4 text-sm text-foreground border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
           >
-            <option value="">לא הוגדר</option>
+            <option value="">מה הכי מתאר אותך כרגע?</option>
             {LIFE_NICHE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}

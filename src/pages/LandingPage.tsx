@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { getAuthenticatedEntryRoute } from '@/lib/routing/resolveAuthenticatedEntry';
 import LandingHeader from '@/components/landing/LandingHeader';
 import HeroSection from '@/components/landing/HeroSection';
 import StatsStrip from '@/components/landing/StatsStrip';
@@ -34,9 +35,14 @@ export default function LandingPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!loading && authId) {
-      navigate('/clicks', { replace: true });
-    }
+    if (loading || !authId) return;
+    let cancelled = false;
+    void getAuthenticatedEntryRoute(authId).then((route) => {
+      if (!cancelled) navigate(route, { replace: true });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loading, authId, navigate]);
 
   return (

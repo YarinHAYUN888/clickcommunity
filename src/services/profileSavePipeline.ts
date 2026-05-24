@@ -111,6 +111,36 @@ function draftToProfileRow(
   return row;
 }
 
+/** Idempotent: ensure new signups are community members (role=member), not guest. */
+export async function ensureCommunityMemberDefaults(userId: string): Promise<void> {
+  const { data: row, error: fetchErr } = await supabase
+    .from('profiles')
+    .select('role, moderation_status')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (fetchErr) {
+    console.error('[ensureCommunityMemberDefaults] fetch failed', fetchErr);
+    return;
+  }
+
+  const role = row?.role ?? 'guest';
+  if (role === 'member') return;
+
+  const patch: Record<string, unknown> = {
+    ...NEW_SIGNUP_PROFILE_DEFAULTS,
+    updated_at: new Date().toISOString(),
+  };
+  if (row?.moderation_status === 'rejected') {
+    delete patch.moderation_status;
+  }
+
+  const { error: updateErr } = await supabase.from('profiles').update(patch).eq('user_id', userId);
+  if (updateErr) {
+    console.error('[ensureCommunityMemberDefaults] update failed', updateErr);
+  }
+}
+
 /** Persist text + flags without requiring photos. */
 export async function saveProfileTextFromDraft(
   userId: string,
@@ -125,8 +155,6 @@ export async function saveProfileTextFromDraft(
     const fallback: ProfilesInsert = { ...profileData };
     delete (fallback as Record<string, unknown>).profile_completed;
     delete (fallback as Record<string, unknown>).image_upload_status;
-    delete (fallback as Record<string, unknown>).moderation_status;
-    delete (fallback as Record<string, unknown>).role;
     const retry = await supabase.from('profiles').upsert(fallback, { onConflict: 'user_id' });
     error = retry.error;
   }
@@ -135,15 +163,21 @@ export async function saveProfileTextFromDraft(
     throw new Error('profile_save_failed');
   }
 
-  await supabase
+  const flagsPatch: Record<string, unknown> = {
+    ...NEW_SIGNUP_PROFILE_DEFAULTS,
+    profile_completed: profileData.profile_completed,
+    image_upload_status: imageUploadStatus,
+    updated_at: new Date().toISOString(),
+  };
+  const { error: flagsErr } = await supabase
     .from('profiles')
-    .update({
-      ...NEW_SIGNUP_PROFILE_DEFAULTS,
-      profile_completed: profileData.profile_completed,
-      image_upload_status: imageUploadStatus,
-      updated_at: new Date().toISOString(),
-    })
+    .update(flagsPatch)
     .eq('user_id', userId);
+
+  if (flagsErr) {
+    console.error('[saveProfileTextFromDraft] flags update failed', flagsErr);
+    throw new Error('profile_save_failed');
+  }
 
   writeSaveProgress(userId, { textSaved: true, photoUrls: photoList, imageUploadStatus });
 }
@@ -167,6 +201,8 @@ export async function finalizeOnboardingProfile(
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
   let profileSyncFailed = false;
 
+  await ensureCommunityMemberDefaults(userId);
+
   try {
     await saveProfileTextFromDraft(userId, data, [], 'pending');
   } catch (e) {
@@ -180,8 +216,8 @@ export async function finalizeOnboardingProfile(
       imageUploadStatus = photoUrls.length > 0 ? 'success' : 'pending';
     } catch (e) {
       if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
-        imageUploadStatus = 'failed';
-        console.error('[finalizeOnboardingProfile] all photos failed', e);
+        imageUploadStatus = 'pending';
+        console.error('[finalizeOnboardingProfile] all photos failed — text kept, status pending', e);
       } else {
         console.warn('[finalizeOnboardingProfile] partial photo upload', e);
         imageUploadStatus = 'pending';

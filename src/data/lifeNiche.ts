@@ -3,7 +3,6 @@
  * Labels align with product personas (PDF spec).
  */
 export const LIFE_NICHE_OPTIONS = [
-  { value: 'soldier_post_service', label: '🪖 אחרי שירות / חיילות' },
   { value: 'post_big_trip', label: '✈️ אחרי טיול גדול' },
   { value: 'student', label: '📚 סטודנט/ית' },
   { value: 'first_job', label: '💼 בעבודה הראשונה' },
@@ -18,9 +17,8 @@ const ALLOWED = new Set<string>(LIFE_NICHE_OPTIONS.map((o) => o.value));
 
 /** Conservative adjacency for tier-4 feed expansion (same life-stage family). */
 export const LIFE_NICHE_ADJACENCY: Record<string, string[]> = {
-  soldier_post_service: ['discharged', 'soldier_active_service', 'first_job'],
-  soldier_active_service: ['soldier_post_service', 'discharged'],
-  discharged: ['soldier_post_service', 'first_job'],
+  soldier_active_service: ['discharged', 'first_job'],
+  discharged: ['soldier_active_service', 'first_job'],
   post_big_trip: ['student', 'first_job'],
   student: ['first_job', 'post_big_trip'],
   first_job: ['student', 'business_world', 'post_big_trip'],

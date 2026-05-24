@@ -5,10 +5,17 @@
  * אחרת השליחה תיכשל. חלופה: פרוקסי same-origin (Edge/Netlify וכו').
  */
 
+import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
+
 export const DEFAULT_N8N_OTP_WEBHOOK_URL =
   'https://redagentai.app.n8n.cloud/webhook/send-otp';
 
-const SYNC_TIMEOUT_MS = 20_000;
+function resolveSyncTimeoutMs(): number {
+  const raw = import.meta.env.VITE_OTP_WEBHOOK_TIMEOUT_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return 35_000;
+}
 
 /** שישה ספרות בטווח [100000, 999999] — קריפטוגרפית אקראי */
 export function generateNumericOtp(): string {
@@ -73,6 +80,7 @@ export interface SyncOtpWebhookResult {
   ok: boolean;
   status: number;
   error?: string;
+  body?: unknown;
 }
 
 export function resolveOtpWebhookUrl(): string {
@@ -81,12 +89,22 @@ export function resolveOtpWebhookUrl(): string {
   );
 }
 
+function bodyIndicatesSuccess(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const o = body as Record<string, unknown>;
+  if (o.success === true || o.ok === true) return true;
+  return false;
+}
+
 export async function syncOtpToWebhook(
   payload: Record<string, unknown>,
 ): Promise<SyncOtpWebhookResult> {
   const url = resolveOtpWebhookUrl();
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+  const timeoutMs = resolveSyncTimeoutMs();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  logOnboardingStep(2, { phase: 'webhook_start', url: url.replace(/\/\/[^/]+/, '//***') });
 
   try {
     const res = await fetch(url, {
@@ -96,10 +114,23 @@ export async function syncOtpToWebhook(
       signal: controller.signal,
     });
     window.clearTimeout(timer);
-    if (import.meta.env.DEV && !res.ok) {
-      console.error('[n8n OTP webhook]', res.status);
+
+    let body: unknown;
+    try {
+      const text = await res.text();
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = undefined;
     }
-    return { ok: res.ok, status: res.status };
+
+    const ok = res.ok || bodyIndicatesSuccess(body);
+    if (!ok && import.meta.env.DEV) {
+      console.error('[n8n OTP webhook]', res.status, body);
+    }
+
+    logOnboardingStep(2, { phase: 'webhook_done', ok, status: res.status });
+
+    return { ok, status: res.status, body };
   } catch (e) {
     window.clearTimeout(timer);
     const error =
@@ -111,6 +142,7 @@ export async function syncOtpToWebhook(
     if (import.meta.env.DEV) {
       console.error('[n8n OTP webhook]', error);
     }
+    logOnboardingStep(2, { phase: 'webhook_error', error });
     return { ok: false, status: 0, error };
   }
 }

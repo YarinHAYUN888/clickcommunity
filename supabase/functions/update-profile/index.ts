@@ -27,7 +27,6 @@ Deno.serve(async (req) => {
     if (occupation !== undefined) updates.occupation = occupation;
     if (life_niche !== undefined) {
       const allowed = new Set([
-        "soldier_post_service",
         "post_big_trip",
         "student",
         "first_job",
@@ -78,7 +77,6 @@ Deno.serve(async (req) => {
     const gender = typeof row.gender === "string" ? row.gender.trim() : "";
     const niche = typeof row.life_niche === "string" ? row.life_niche.trim() : "";
     const allowedNiche = new Set([
-      "soldier_post_service",
       "post_big_trip",
       "student",
       "first_job",

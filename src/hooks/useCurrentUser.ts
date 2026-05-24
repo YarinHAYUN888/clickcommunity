@@ -1,5 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { ensureCommunityMemberDefaults } from '@/services/profileSavePipeline';
+
+const GUEST_HEAL_KEY = 'clicks_guest_role_healed';
 
 const profileListeners = new Set<(userId: string) => void>();
 
@@ -113,10 +116,30 @@ export function useCurrentUser(): CurrentUser {
             }
           }
 
+          if (
+            profileData &&
+            profileData.role === 'guest' &&
+            !sessionStorage.getItem(`${GUEST_HEAL_KEY}:${userId}`)
+          ) {
+            try {
+              sessionStorage.setItem(`${GUEST_HEAL_KEY}:${userId}`, '1');
+              await ensureCommunityMemberDefaults(userId);
+              const { data: healed } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .maybeSingle();
+              if (healed) profileData = healed as SupabaseProfile;
+            } catch (healErr) {
+              console.warn('[useCurrentUser] guest→member heal failed', healErr);
+            }
+          }
+
           if (mountedRef.current) setProfile(profileData);
           if (profileData) {
             console.info('[useCurrentUser] profile state', {
               userId,
+              role: profileData.role,
               suitability: profileData.suitability_status,
               completed: profileData.profile_completed,
               imageUpload: profileData.image_upload_status,
