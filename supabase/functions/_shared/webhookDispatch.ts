@@ -1,4 +1,7 @@
-/** Server-only webhook dispatch with optional HMAC signature. */
+/**
+ * Server-only webhook dispatch with optional HMAC signature.
+ * n8n Gmail nodes read $('Webhook').item.json.body.email — payloads use nested `body.*`.
+ */
 
 export type OtpDeliveryChannel = "email" | "phone";
 
@@ -111,12 +114,18 @@ export async function postSignedWebhookWithRetry(
   return { ok: false, status: last.status, uncertain };
 }
 
-/** Redact OTP from payloads before logging. */
+/** Redact OTP from payloads before logging (root or nested n8n `body`). */
 export function redactWebhookPayloadForLog(
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   const copy = { ...payload };
   if ("code" in copy) copy.code = "[redacted]";
   if ("photos" in copy) copy.photos = "[redacted]";
+  const nested = copy.body;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const bodyCopy = { ...(nested as Record<string, unknown>) };
+    if ("code" in bodyCopy) bodyCopy.code = "[redacted]";
+    copy.body = bodyCopy;
+  }
   return copy;
 }

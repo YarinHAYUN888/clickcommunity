@@ -18,6 +18,7 @@ export type OnboardingFlowErrorCode =
   | 'otp_code_invalid'
   | 'otp_rate_limited'
   | 'otp_too_many_attempts'
+  | 'otp_email_required'
   | 'otp_email_invalid'
   | 'otp_email_delivery_failed'
   | 'otp_sent_uncertain'

@@ -10,6 +10,7 @@ import {
 import { getRequestMeta } from "./requestMeta.ts";
 import { checkRateLimit } from "./securityRateLimit.ts";
 import { writeSecurityAudit } from "./securityAudit.ts";
+import { buildN8nWebhookEnvelope, toApiChannel } from "./n8nOtpEnvelope.ts";
 import {
   postSignedWebhookWithRetry,
   redactWebhookPayloadForLog,
@@ -85,48 +86,13 @@ async function checkIssueRateLimits(
   return { allowed: true };
 }
 
-function buildWebhookPayload(
-  channel: OtpDeliveryChannel,
-  code: string,
-  challengeId: string,
-  body: Record<string, unknown>,
-  destination: string,
-): Record<string, unknown> {
-  const base: Record<string, unknown> = {
-    event: "otp_send",
-    action: "send",
-    channel,
-    destination,
-    purpose: "registration",
-    code,
-    challengeId,
-    verificationMethod: channel,
-  };
-
-  if (channel === "email") {
-    return {
-      ...base,
-      email: destination,
-      firstName: body.firstName ?? "",
-      lastName: body.lastName ?? "",
-    };
-  }
-
-  return {
-    ...base,
-    phone: destination,
-    firstName: body.firstName ?? "",
-    lastName: body.lastName ?? "",
-    gender: body.gender ?? "",
-    dateOfBirth: body.dateOfBirth ?? null,
-    region: body.region ?? "",
-    regionOther: body.regionOther ?? "",
-    occupation: body.occupation ?? "",
-    bio: body.bio ?? "",
-    instagram: body.instagram ?? "",
-    tiktok: body.tiktok ?? "",
-    interests: body.interests ?? [],
-  };
+function normalizeChannel(
+  raw: unknown,
+): { internal: OtpDeliveryChannel | null; api: "email" | "sms" | null } {
+  const s = String(raw ?? "").toLowerCase();
+  if (s === "email") return { internal: "email", api: "email" };
+  if (s === "sms" || s === "phone") return { internal: "phone", api: "sms" };
+  return { internal: null, api: null };
 }
 
 async function dispatchOtp(
@@ -135,6 +101,7 @@ async function dispatchOtp(
   challengeId: string,
   body: Record<string, unknown>,
   destination: string,
+  registrationSessionId: string | null,
 ): Promise<"sent" | "uncertain" | "skipped_no_webhook"> {
   const n8nUrl = resolveOtpWebhookUrl(channel);
   if (!n8nUrl) {
@@ -142,7 +109,14 @@ async function dispatchOtp(
     return "skipped_no_webhook";
   }
 
-  const webhookPayload = buildWebhookPayload(channel, code, challengeId, body, destination);
+  const webhookPayload = buildN8nWebhookEnvelope(
+    channel,
+    code,
+    challengeId,
+    destination,
+    body,
+    registrationSessionId,
+  );
   try {
     const res = await postSignedWebhookWithRetry(n8nUrl, webhookPayload, {
       timeoutMs: 12_000,
@@ -162,23 +136,42 @@ async function dispatchOtp(
 
 export async function handleIssueOtp(req: Request): Promise<Response> {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-  const channelRaw = String(body.verificationMethod ?? body.channel ?? "").toLowerCase();
-  const channel: OtpDeliveryChannel = channelRaw === "phone" ? "phone" : "email";
+  let { internal: channel, api: apiChannel } = normalizeChannel(
+    body.channel ?? body.verificationMethod,
+  );
 
   const email =
-    channel === "email" && typeof body.email === "string"
-      ? body.email.trim().toLowerCase()
-      : undefined;
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const phone =
-    channel === "phone" && typeof body.phone === "string"
-      ? body.phone.trim()
-      : undefined;
+    typeof body.phone === "string" ? body.phone.trim() : "";
 
-  if (channel === "email" && (!email || !isValidEmail(email))) {
-    return failResponse("invalid_email", 400);
+  if (!channel && email) {
+    channel = "email";
+    apiChannel = "email";
+  }
+  if (!channel && phone) {
+    channel = "phone";
+    apiChannel = "sms";
   }
 
-  const identifier = normalizeIdentifier(email, phone, channel);
+  if (!channel) {
+    return failResponse("email_required", 400);
+  }
+
+  if (channel === "email") {
+    if (!email) return failResponse("email_required", 400);
+    if (!isValidEmail(email)) return failResponse("invalid_email", 400);
+  }
+
+  if (channel === "phone") {
+    if (!phone) return failResponse("phone_required", 400);
+  }
+
+  const identifier = normalizeIdentifier(
+    channel === "email" ? email : undefined,
+    channel === "phone" ? phone : undefined,
+    channel,
+  );
   if (!identifier) {
     return failResponse(channel === "email" ? "invalid_email" : "invalid_phone", 400);
   }
@@ -233,6 +226,7 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     row.id,
     body,
     destinationForWebhook,
+    sessionId,
   );
 
   await writeSecurityAudit(supabase, {
@@ -248,6 +242,7 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     ok: true,
     challenge_id: row.id,
     expires_at: expiresAt,
+    channel: apiChannel ?? toApiChannel(channel),
     delivery_channel: channel,
     delivery_status: deliveryStatus,
     message: "otp_sent",
@@ -258,9 +253,7 @@ export async function handleVerifyOtp(req: Request): Promise<Response> {
   const body = await req.json().catch(() => ({}));
   const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : "";
   const code = typeof body.code === "string" ? body.code.replace(/\D/g, "") : "";
-  const channelRaw = String(body.verificationMethod ?? body.channel ?? "").toLowerCase();
-  const channel: OtpDeliveryChannel | undefined =
-    channelRaw === "phone" ? "phone" : channelRaw === "email" ? "email" : undefined;
+  const { internal: channel } = normalizeChannel(body.channel ?? body.verificationMethod);
 
   const email =
     channel === "email" && typeof body.email === "string"
@@ -270,6 +263,10 @@ export async function handleVerifyOtp(req: Request): Promise<Response> {
     channel === "phone" && typeof body.phone === "string"
       ? body.phone.trim()
       : undefined;
+
+  if (!channel) {
+    return jsonResponse({ error: "invalid_request", error_code: "invalid_request" }, 400);
+  }
 
   const identifier = normalizeIdentifier(email, phone, channel);
 

@@ -10,6 +10,9 @@ import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
 
 export type VerificationChannel = 'email' | 'phone';
 
+/** API channel sent to Edge (Contract A). SMS uses "sms"; internal DB may use "phone". */
+export type OtpApiChannel = 'email' | 'sms';
+
 /** @deprecated Legacy webhook result type for classifyOtpWebhookFailure */
 export type SyncOtpWebhookResult = {
   ok: boolean;
@@ -39,11 +42,9 @@ export interface IssueOtpResult {
   ok: boolean;
   challengeId?: string;
   expiresAt?: string;
-  /** Edge error_code or legacy error string */
   error?: string;
   errorCode?: string;
   deliveryStatus?: OtpDeliveryStatus;
-  /** Challenge created but email/SMS dispatch uncertain — still proceed to code entry */
   deliveryUncertain?: boolean;
 }
 
@@ -57,6 +58,7 @@ type IssueOtpEdgeBody = {
   ok?: boolean;
   challenge_id?: string;
   expires_at?: string;
+  channel?: string;
   error?: string;
   error_code?: string;
   delivery_status?: OtpDeliveryStatus;
@@ -70,39 +72,48 @@ function phoneE164(phone: string): string {
   return cleaned ? `+972${cleaned}` : '';
 }
 
-/** Build invoke body — email and SMS payloads are isolated. */
+export function toOtpApiChannel(method: VerificationChannel): OtpApiChannel {
+  return method === 'email' ? 'email' : 'sms';
+}
+
+const PROFILE_FIELDS_FOR_N8N = (data: OnboardingOtpPayloadSource) => ({
+  firstName: data.firstName,
+  lastName: data.lastName,
+  gender: data.gender,
+  dateOfBirth: data.dateOfBirth,
+  region: data.region,
+  regionOther: data.regionOther,
+  occupation: data.occupation,
+  bio: data.bio,
+  instagram: data.instagram,
+  tiktok: data.tiktok,
+  interests: data.interests,
+});
+
+/** Contract A: Frontend → Edge invoke body */
 export function buildIssueOtpInvokeBody(
   data: OnboardingOtpPayloadSource,
   verificationMethod: VerificationChannel,
   registrationSessionId?: string,
 ): Record<string, unknown> {
-  const shared = {
-    verificationMethod,
-    firstName: data.firstName,
-    lastName: data.lastName,
-    gender: data.gender,
-    dateOfBirth: data.dateOfBirth,
-    region: data.region,
-    regionOther: data.regionOther,
-    occupation: data.occupation,
-    bio: data.bio,
-    instagram: data.instagram,
-    tiktok: data.tiktok,
-    interests: data.interests,
-    registration_session_id: registrationSessionId,
-  };
+  const channel = toOtpApiChannel(verificationMethod);
+  const profile = PROFILE_FIELDS_FOR_N8N(data);
 
-  if (verificationMethod === 'email') {
+  if (channel === 'email') {
     return {
-      ...shared,
+      channel: 'email',
       email: (data.email ?? '').trim().toLowerCase(),
+      registration_session_id: registrationSessionId,
+      ...profile,
     };
   }
 
   const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
   return {
-    ...shared,
+    channel: 'sms',
     phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+    registration_session_id: registrationSessionId,
+    ...profile,
   };
 }
 
@@ -113,14 +124,15 @@ export function buildVerifyOtpInvokeBody(
   code: string,
   registrationSessionId?: string,
 ): Record<string, unknown> {
+  const channel = toOtpApiChannel(verificationMethod);
   const base = {
+    channel,
     challenge_id: challengeId,
     code,
-    verificationMethod,
     registration_session_id: registrationSessionId,
   };
 
-  if (verificationMethod === 'email') {
+  if (channel === 'email') {
     return { ...base, email: (data.email ?? '').trim().toLowerCase() };
   }
 
@@ -129,6 +141,16 @@ export function buildVerifyOtpInvokeBody(
     ...base,
     phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
   };
+}
+
+function logIssueOtpPayloadDev(invokeBody: Record<string, unknown>): void {
+  if (!import.meta.env.DEV && import.meta.env.VITE_ONBOARDING_DEBUG !== 'true') return;
+  console.info('ISSUE OTP PAYLOAD', {
+    channel: invokeBody.channel,
+    hasEmail: typeof invokeBody.email === 'string' && invokeBody.email.length > 0,
+    hasPhone: typeof invokeBody.phone === 'string' && invokeBody.phone.length > 0,
+    registration_session_id: invokeBody.registration_session_id,
+  });
 }
 
 async function parseIssueOtpEdgeBody(
@@ -170,6 +192,23 @@ export async function issueOnboardingOtp(
   registrationSessionId?: string,
 ): Promise<IssueOtpResult> {
   const invokeBody = buildIssueOtpInvokeBody(data, verificationMethod, registrationSessionId);
+  const channel = invokeBody.channel as OtpApiChannel;
+
+  if (channel === 'email') {
+    const email = typeof invokeBody.email === 'string' ? invokeBody.email : '';
+    if (!email) {
+      return { ok: false, error: 'email_required', errorCode: 'email_required' };
+    }
+  }
+
+  if (channel === 'sms') {
+    const phone = typeof invokeBody.phone === 'string' ? invokeBody.phone : '';
+    if (!phone) {
+      return { ok: false, error: 'phone_required', errorCode: 'phone_required' };
+    }
+  }
+
+  logIssueOtpPayloadDev(invokeBody);
 
   if (verificationMethod === 'email') {
     logEmailOtpStep(2, { email: invokeBody.email, hasSession: !!registrationSessionId });
@@ -235,20 +274,20 @@ export async function verifyOnboardingOtp(
   });
 
   if (res && typeof res === 'object') {
-    const body = res as { ok?: boolean; verification_token?: string; error?: string };
+    const body = res as { ok?: boolean; verification_token?: string; error?: string; error_code?: string };
     if (body?.ok && body.verification_token) {
       return { ok: true, verificationToken: body.verification_token };
     }
-    if (body?.error) {
-      return { ok: false, error: body.error };
-    }
+    const err = body?.error_code ?? body?.error;
+    if (err) return { ok: false, error: err };
   }
 
   if (error instanceof FunctionsHttpError) {
     try {
       const res = error.context as Response;
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) return { ok: false, error: body.error };
+      const body = (await res.json()) as { error?: string; error_code?: string };
+      const err = body?.error_code ?? body?.error;
+      if (err) return { ok: false, error: err };
     } catch {
       /* ignore */
     }
@@ -270,7 +309,6 @@ export function generateNumericOtp(): string {
   return String((combined % 900_000) + 100_000);
 }
 
-/** מחלץ 6 ספרות רצופות מהטקסט (למשל מהלוח) */
 export function extractSixDigitCode(text: string): string | null {
   const digits = text.replace(/\D/g, '');
   return digits.length >= 6 ? digits.slice(0, 6) : null;

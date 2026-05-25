@@ -44,7 +44,7 @@ export function normalizeIdentifier(
     return null;
   }
 
-  if (ch === "phone") {
+  if (ch === "phone" || ch === "sms") {
     if (p && /^\+9725\d{8}$/.test(p)) return `phone:${p}`;
     return null;
   }

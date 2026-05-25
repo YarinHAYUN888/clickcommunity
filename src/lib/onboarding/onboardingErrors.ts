@@ -9,6 +9,7 @@ const HEBREW_MESSAGES: Record<OnboardingFlowErrorCode, string> = {
   otp_code_invalid: 'קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.',
   otp_rate_limited: 'נשלחו יותר מדי קודים. נסו/י שוב בעוד כמה דקות.',
   otp_too_many_attempts: 'יותר מדי ניסיונות לאימות הקוד. בקשו קוד חדש או נסו מאוחר יותר.',
+  otp_email_required: 'נא להזין כתובת מייל לפני שליחת קוד האימות.',
   otp_email_invalid: 'כתובת המייל אינה תקינה.',
   otp_email_delivery_failed: 'לא הצלחנו לשלוח קוד למייל. בדקו שהמייל תקין ונסו שוב.',
   otp_sent_uncertain:
@@ -134,6 +135,8 @@ export function readPendingOtp(): string | null {
 /** Map Edge OTP issue (send) error codes to Hebrew onboarding messages. */
 export function mapIssueOtpError(edgeError?: string): OnboardingFlowErrorCode {
   switch (edgeError) {
+    case 'email_required':
+      return 'otp_email_required';
     case 'invalid_email':
       return 'otp_email_invalid';
     case 'email_delivery_failed':

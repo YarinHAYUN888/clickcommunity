@@ -39,6 +39,19 @@ supabase secrets set WEBHOOK_INTERNAL_SECRET=... N8N_WEBHOOK_SECRET=... OTP_WEBH
 supabase functions deploy issue-onboarding-otp verify-onboarding-otp send-registration-otp verify-registration-otp complete-registration update-profile get-profile-stats check-subscription-eligibility cancel-subscription create-referral referral-preview analyze-registration-suitability automation-dispatch compute-compatibility
 ```
 
+### OTP payload contract (email)
+
+After changing `onboardingOtpCore` / `n8nOtpEnvelope`, redeploy at minimum:
+
+```bash
+supabase functions deploy issue-onboarding-otp verify-onboarding-otp send-registration-otp verify-registration-otp
+```
+
+- **Contract A (browser → Edge):** `{ channel: "email"|"sms", email|phone, registration_session_id }`
+- **Contract B (Edge → n8n):** POST root `{ body: { email, code, channel, purpose: "registration", ... } }` so Gmail can read `$('Webhook').item.json.body.email`
+- Do not change `OTP_EMAIL_WEBHOOK_URL` / TEST↔PROD mapping or n8n Gmail nodes
+- Post-deploy: trigger email OTP and confirm n8n execution shows `json.body.email` populated
+
 ## Frontend
 
 - Remove `VITE_OPENAI_API_KEY` and `VITE_N8N_*` from production env.
