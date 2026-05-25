@@ -12,6 +12,12 @@ verify_jwt = false
 [functions.complete-registration]
 verify_jwt = false
 
+[functions.issue-onboarding-otp]
+verify_jwt = false
+
+[functions.verify-onboarding-otp]
+verify_jwt = false
+
 # Authenticated members only; same default as other JWT-backed functions
 [functions.record-profile-swipe]
 verify_jwt = true

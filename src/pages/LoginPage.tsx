@@ -45,9 +45,7 @@ export default function LoginPage() {
         return;
       }
 
-      const { route, profile } = await resolvePostAuthRedirect(uid);
-      console.log("Loaded profile after login:", profile);
-      console.log("Redirecting after login:", route);
+      const { route } = await resolvePostAuthRedirect(uid);
       if (route === '/clicks' || route === '/pending-review') notifyProfileUpdated(uid);
       navigate(route, { replace: true });
     } catch (e) {

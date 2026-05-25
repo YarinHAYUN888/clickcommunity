@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { normalizeIdentifier } from "../_shared/otpCrypto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,7 +32,7 @@ function buildProfilesUpsertRow(
     profile_completed: false,
     image_upload_status: "pending",
     role: "member",
-    moderation_status: "approved",
+    moderation_status: "pending",
     suitability_status: "active",
     is_shadow: false,
   };
@@ -146,7 +147,7 @@ async function promoteGuestToMemberIfNeeded(
     .from("profiles")
     .update({
       role: "member",
-      moderation_status: "approved",
+      moderation_status: "pending",
       suitability_status: "active",
       is_shadow: false,
       updated_at: new Date().toISOString(),
@@ -175,10 +176,36 @@ Deno.serve(async (req) => {
       return json({ error: "email and password required", diagnostics: { stage: "validation" } }, 400);
     }
 
+    const verificationToken = normalizeString(body?.verification_token);
+    const rawPhone = normalizeString(body?.profile?.phone).replace(/[-\s]/g, "").replace(/^0/, "");
+    const phoneE164 = /^5\d{8}$/.test(rawPhone) ? `+972${rawPhone}` : undefined;
+    const identifier =
+      normalizeIdentifier(email, phoneE164, "email") ?? `email:${email}`;
+
+    if (!verificationToken) {
+      return json({ error: "verification_token required", diagnostics: { stage: "otp" } }, 401);
+    }
+
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    const { data: otpRow, error: otpErr } = await supabaseAdmin
+      .from("onboarding_otp_challenges")
+      .select("id, identifier, verification_token, verified_at, expires_at")
+      .eq("verification_token", verificationToken)
+      .eq("identifier", identifier)
+      .not("verified_at", "is", null)
+      .maybeSingle();
+
+    if (otpErr || !otpRow) {
+      return json({ error: "otp_not_verified", diagnostics: { stage: "otp" } }, 401);
+    }
+
+    if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+      return json({ error: "otp_expired", diagnostics: { stage: "otp" } }, 401);
+    }
 
     let code: "created" | "already_exists" = "created";
     let userId: string | null = null;

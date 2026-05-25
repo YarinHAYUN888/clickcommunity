@@ -14,19 +14,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { claimSignupRewards, fetchReferrerPreview } from '@/services/points';
 import {
-  buildOtpWebhookPayload,
   extractSixDigitCode,
-  generateNumericOtp,
-  syncOtpToWebhook,
+  issueOnboardingOtp,
+  verifyOnboardingOtp,
 } from '@/services/otpDelivery';
 import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
 import {
-  classifyOtpWebhookFailure,
   clearPendingOtp,
   errorCodeFromMessage,
   getHebrewOnboardingMessage,
-  persistPendingOtp,
-  readPendingOtp,
+  persistPendingOtpChallenge,
+  readPendingOtpChallenge,
+  shouldShowRegistrationFailed,
+  verifyErrorCodeForStage,
 } from '@/lib/onboarding/onboardingErrors';
 import {
   runPostOtpRegistration,
@@ -882,7 +882,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   const [resendTimer, setResendTimer] = useState(60);
   const [sendError, setSendError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const generatedCodeRef = useRef<string>(readPendingOtp() ?? '');
+  const challengeIdRef = useRef<string>(readPendingOtpChallenge() ?? '');
   const lastRegistrationCodeRef = useRef<'created' | 'already_exists' | undefined>(undefined);
 
   useEffect(() => {
@@ -1007,21 +1007,16 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     setSending(true);
 
     try {
-      const newCode = generateNumericOtp();
-      generatedCodeRef.current = newCode;
-      persistPendingOtp(newCode);
-      const payload = buildOtpWebhookPayload(data, method, newCode);
-      const result = await syncOtpToWebhook(payload);
+      const result = await issueOnboardingOtp(data, method);
 
-      if (!result.ok) {
-        setSendError(getHebrewOnboardingMessage(classifyOtpWebhookFailure(result)));
+      if (!result.ok || !result.challengeId) {
+        setSendError(getHebrewOnboardingMessage('otp_webhook_failed'));
         setSending(false);
         return;
       }
 
-      if (import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true') {
-        toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
-      }
+      challengeIdRef.current = result.challengeId;
+      persistPendingOtpChallenge(result.challengeId);
 
       setSendError('');
       setCodeSent(true);
@@ -1069,10 +1064,20 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     if (code.length !== 6 || verifying || postAuthBusy) return;
     setVerifying(true);
     try {
-      const expected =
-        generatedCodeRef.current || readPendingOtp() || '';
-      if (!expected || code !== expected) {
+      const challengeId = challengeIdRef.current || readPendingOtpChallenge() || '';
+      if (!challengeId) {
         setVerifyError(getHebrewOnboardingMessage('otp_code_invalid'));
+        setShakeOtp(true);
+        return;
+      }
+
+      const otpVerify = await verifyOnboardingOtp(data, method as 'email' | 'phone', challengeId, code);
+      if (!otpVerify.ok || !otpVerify.verificationToken) {
+        const errCode =
+          otpVerify.error === 'otp_expired'
+            ? 'otp_code_invalid'
+            : 'otp_code_invalid';
+        setVerifyError(getHebrewOnboardingMessage(errCode));
         setShakeOtp(true);
         setOtp(['', '', '', '', '', '']);
         setTimeout(() => inputRefs.current[0]?.focus(), 350);
@@ -1088,6 +1093,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         registrationBody: {
           email,
           password,
+          verification_token: otpVerify.verificationToken,
           firstName: data.firstName,
           lastName: data.lastName,
           referralCode: data.referralCode?.trim() || undefined,
@@ -1151,6 +1157,20 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       console.error('Verify exception:', e);
 
       try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          const { route } = await resolvePostAuthRedirect(session.user.id);
+          toast.warning(getHebrewOnboardingMessage('auth_completion_sync_pending'));
+          if (route === '/clicks' || route === '/pending-review') {
+            notifyProfileUpdated(session.user.id);
+          }
+          navigate(route, { replace: true });
+          clearData();
+          return;
+        }
+
         const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
         const recovery = await tryRecoverSessionAfterFailure(
           draft,
@@ -1177,9 +1197,26 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         console.warn('[VerifyStep] recovery failed', recoveryErr);
       }
 
-      const code =
-        e instanceof Error ? errorCodeFromMessage(e.message) : 'unknown';
-      setVerifyError(getHebrewOnboardingMessage(code));
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user && !shouldShowRegistrationFailed(true)) {
+        toast.warning(getHebrewOnboardingMessage('auth_completion_sync_pending'));
+        const { route } = await resolvePostAuthRedirect(session.user.id);
+        navigate(route, { replace: true });
+        clearData();
+        return;
+      }
+
+      const code = e instanceof Error ? errorCodeFromMessage(e.message) : 'unknown';
+      let mappedCode =
+        code === 'unknown'
+          ? verifyErrorCodeForStage('registration_invoke', Boolean(session?.user))
+          : code;
+      if (session?.user && mappedCode === 'registration_failed') {
+        mappedCode = 'auth_completion_sync_pending';
+      }
+      setVerifyError(getHebrewOnboardingMessage(mappedCode));
     } finally {
       setVerifying(false);
     }
@@ -1213,18 +1250,12 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     setVerifyError('');
     setResendTimer(60);
     try {
-      const newCode = generateNumericOtp();
-      generatedCodeRef.current = newCode;
-      persistPendingOtp(newCode);
-      const payload = buildOtpWebhookPayload(data, method, newCode);
-      const result = await syncOtpToWebhook(payload);
-      if (!result.ok) {
-        console.error('Resend error:', result);
-        setVerifyError(getHebrewOnboardingMessage(classifyOtpWebhookFailure(result)));
+      const result = await issueOnboardingOtp(data, method);
+      if (!result.ok || !result.challengeId) {
+        setVerifyError(getHebrewOnboardingMessage('otp_webhook_failed'));
       } else {
-        if (import.meta.env.VITE_SHOW_OTP_PLAINTEXT === 'true') {
-          toast.info(`קוד האימות (לבדיקה בלבד): ${newCode}`, { duration: 120_000 });
-        }
+        challengeIdRef.current = result.challengeId;
+        persistPendingOtpChallenge(result.challengeId);
         inputRefs.current[0]?.focus();
       }
     } catch (e) {

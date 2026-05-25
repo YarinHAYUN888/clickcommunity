@@ -1,11 +1,17 @@
 import type { VoiceIntroDraft } from '@/contexts/OnboardingContext';
 import { supabase } from '@/integrations/supabase/client';
 import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
+import {
+  isLikelyMobileSafari,
+  logAuthCompletionStep,
+  type AuthCompletionFailureStage,
+} from '@/lib/onboarding/authCompletionDebug';
 import { resolvePostAuthRedirect, type PostAuthRoute } from '@/lib/routing/postAuthRedirect';
 import { claimSignupRewards } from '@/services/points';
 import {
   invokeCompleteRegistration,
   type CompleteRegistrationBody,
+  type RegistrationInvokeResult,
 } from '@/services/completeRegistration';
 import {
   ensureCommunityMemberDefaults,
@@ -26,18 +32,41 @@ export type PostOtpRegistrationResult = {
   imageUploadStatus: 'pending' | 'success' | 'failed';
   sessionEstablished: boolean;
   route: PostAuthRoute;
+  failureStage?: AuthCompletionFailureStage;
 };
 
 async function waitForSession(timeoutMs: number): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (session?.user?.id) return session.user.id;
-    await new Promise((r) => setTimeout(r, SESSION_POLL_MS));
-  }
-  return null;
+  return await new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    let finished = false;
+
+    const done = (userId: string | null) => {
+      if (finished) return;
+      finished = true;
+      subscription.data.subscription.unsubscribe();
+      resolve(userId);
+    };
+
+    const subscription = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.id) done(session.user.id);
+    });
+
+    const loop = async () => {
+      while (!finished && Date.now() < deadline) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          done(session.user.id);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, SESSION_POLL_MS));
+      }
+      done(null);
+    };
+
+    void loop();
+  });
 }
 
 /**
@@ -52,19 +81,27 @@ export async function establishSession(
   const {
     data: { session: existing },
   } = await supabase.auth.getSession();
-  if (existing?.user?.email && existing.user.email.toLowerCase() !== email.toLowerCase()) {
+  const emailNorm = email.trim().toLowerCase();
+  if (existing?.user?.id && existing.user.email?.toLowerCase() === emailNorm) {
+    logOnboardingStep(4, { userId: existing.user.id, via: 'existing_session' });
+    logAuthCompletionStep(2, { userId: existing.user.id, via: 'existing_session' });
+    return { userId: existing.user.id, sessionEstablished: true };
+  }
+  if (existing?.user?.email && existing.user.email.toLowerCase() !== emailNorm) {
     await supabase.auth.signOut({ scope: 'local' });
   }
 
+  const waitMs = isLikelyMobileSafari() ? 8000 : SESSION_WAIT_MS;
   const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
     token_hash: tokenHash,
     type: 'magiclink',
   });
 
   if (!verifyErr && verifyData?.user?.id) {
-    const polled = await waitForSession(SESSION_WAIT_MS);
+    const polled = await waitForSession(waitMs);
     if (polled) {
       logOnboardingStep(4, { userId: polled, via: 'verifyOtp' });
+      logAuthCompletionStep(2, { userId: polled, via: 'verifyOtp' });
       return { userId: polled, sessionEstablished: true };
     }
   }
@@ -86,7 +123,23 @@ export async function establishSession(
   const polled = await waitForSession(2000);
   const userId = polled ?? signInData.user.id;
   logOnboardingStep(4, { userId, via: 'signInWithPassword' });
+  logAuthCompletionStep(2, { userId, via: 'signInWithPassword' });
   return { userId, sessionEstablished: true };
+}
+
+async function recoverSessionForInvokeFailure(
+  invokeResult: RegistrationInvokeResult,
+  email: string,
+  password: string,
+): Promise<{ userId: string; registrationCode: 'created' | 'already_exists' } | null> {
+  if (invokeResult.ok || !invokeResult.recoverable) return null;
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password,
+  });
+  if (error || !data.user?.id) return null;
+  logAuthCompletionStep(2, { via: 'recover_signin', userId: data.user.id });
+  return { userId: data.user.id, registrationCode: 'already_exists' };
 }
 
 export type RunPostOtpOptions = {
@@ -104,14 +157,28 @@ export async function runPostOtpRegistration(
   const { registrationBody, draft, photoSources, voiceBlob, analysisPayload, referralCode } =
     opts;
 
-  const { tokenHash, code: registrationCode, userId: edgeUserId } =
-    await invokeCompleteRegistration(registrationBody);
-  logOnboardingStep(1, { registrationCode, userId: edgeUserId });
-
   const email = registrationBody.email;
   const password = registrationBody.password;
+  logAuthCompletionStep(1, { phase: 'start', email });
 
-  const { userId } = await establishSession(tokenHash, email, password, registrationCode);
+  const invokeResult = await invokeCompleteRegistration(registrationBody);
+  let userId = '';
+  let registrationCode: 'created' | 'already_exists' = 'created';
+
+  if (invokeResult.ok) {
+    registrationCode = invokeResult.code;
+    logOnboardingStep(1, { registrationCode, userId: invokeResult.userId });
+    const sessionRes = await establishSession(invokeResult.tokenHash, email, password, registrationCode);
+    userId = sessionRes.userId;
+  } else {
+    const recovered = await recoverSessionForInvokeFailure(invokeResult, email, password);
+    if (!recovered) {
+      throw new Error('registration_invoke_transport');
+    }
+    userId = recovered.userId;
+    registrationCode = recovered.registrationCode;
+  }
+
   await ensureCommunityMemberDefaults(userId);
 
   let profileSyncFailed = false;
@@ -123,12 +190,14 @@ export async function runPostOtpRegistration(
     profileSyncFailed = finalized.profileSyncFailed;
     photoUrls = finalized.photoUrls;
     imageUploadStatus = finalized.imageUploadStatus;
+    logAuthCompletionStep(3, { userId, profileSyncFailed });
+    logAuthCompletionStep(4, { imageUploadStatus, photoCount: photoUrls.length });
     logOnboardingStep(5, { profileSyncFailed, photoCount: photoUrls.length });
     logOnboardingStep(6, { imageUploadStatus });
   } catch (e) {
     console.error('[runPostOtpRegistration] finalize failed', e);
     profileSyncFailed = true;
-    imageUploadStatus = photoSources.length > 0 ? 'pending' : 'pending';
+    imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
   }
 
   if (voiceBlob) {
@@ -159,9 +228,12 @@ export async function runPostOtpRegistration(
     console.warn('[runPostOtpRegistration] claim-signup-rewards:', e);
   }
 
+  logAuthCompletionStep(5, { userId });
   logOnboardingStep(7, { userId });
 
   const { route } = await resolvePostAuthRedirect(userId);
+  await waitForSession(500);
+  logAuthCompletionStep(6, { route });
   logOnboardingStep(8, { route });
 
   return {

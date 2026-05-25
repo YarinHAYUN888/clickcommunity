@@ -1,27 +1,30 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import {
+  assertSelfUserId,
+  jsonResponse,
+  optionsOk,
+  requireAuthUser,
+} from "../_shared/edgeAuth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return optionsOk();
+
+  const auth = await requireAuthUser(req);
+  if (!auth.ok) return auth.response;
 
   try {
-    const { user_id, first_name, occupation, bio, photos, interests, life_niche } = await req.json();
-    if (!user_id) return new Response(JSON.stringify({ error: "user_id required" }), { status: 400, headers: corsHeaders });
+    const body = await req.json();
+    const forbidden = assertSelfUserId(auth.user.id, body.user_id);
+    if (forbidden) return forbidden;
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const userId = auth.user.id;
+    const { first_name, occupation, bio, photos, interests, life_niche } = body;
 
     const updates: Record<string, unknown> = {};
 
     if (first_name !== undefined) {
-      if (typeof first_name !== "string" || first_name.length < 2)
-        return new Response(JSON.stringify({ error: "first_name must be >= 2 chars" }), { status: 400, headers: corsHeaders });
+      if (typeof first_name !== "string" || first_name.length < 2) {
+        return jsonResponse({ error: "first_name must be >= 2 chars" }, 400);
+      }
       updates.first_name = first_name;
     }
     if (occupation !== undefined) updates.occupation = occupation;
@@ -36,29 +39,41 @@ Deno.serve(async (req) => {
       ]);
       const n = typeof life_niche === "string" ? life_niche.trim() : "";
       if (n.length > 0 && !allowed.has(n)) {
-        return new Response(JSON.stringify({ error: "invalid life_niche" }), { status: 400, headers: corsHeaders });
+        return jsonResponse({ error: "invalid life_niche" }, 400);
       }
       updates.life_niche = n.length > 0 ? n : null;
     }
     if (bio !== undefined) {
-      if (typeof bio === "string" && bio.length > 300)
-        return new Response(JSON.stringify({ error: "bio max 300 chars" }), { status: 400, headers: corsHeaders });
+      if (typeof bio === "string" && bio.length > 300) {
+        return jsonResponse({ error: "bio max 300 chars" }, 400);
+      }
       updates.bio = bio;
     }
-    if (photos !== undefined) updates.photos = photos;
+    if (photos !== undefined) {
+      if (!Array.isArray(photos)) {
+        return jsonResponse({ error: "photos must be an array" }, 400);
+      }
+      const urls = photos.filter((u: unknown) => typeof u === "string" && u.length > 0);
+      if (urls.length > 12) {
+        return jsonResponse({ error: "too many photos" }, 400);
+      }
+      updates.photos = urls;
+    }
     if (interests !== undefined) {
-      if (Array.isArray(interests) && interests.length > 0 && interests.length < 5)
-        return new Response(JSON.stringify({ error: "interests must be >= 5 if provided" }), { status: 400, headers: corsHeaders });
+      if (Array.isArray(interests) && interests.length > 0 && interests.length < 5) {
+        return jsonResponse({ error: "interests must be >= 5 if provided" }, 400);
+      }
       updates.interests = interests;
     }
 
-    if (Object.keys(updates).length === 0)
-      return new Response(JSON.stringify({ error: "no fields to update" }), { status: 400, headers: corsHeaders });
+    if (Object.keys(updates).length === 0) {
+      return jsonResponse({ error: "no fields to update" }, 400);
+    }
 
-    const { data, error } = await supabase
+    const { data, error } = await auth.admin
       .from("profiles")
       .update(updates)
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .select("*")
       .single();
 
@@ -84,38 +99,26 @@ Deno.serve(async (req) => {
       "discharged",
       "business_world",
     ]);
-    const q = row.questionnaire_responses;
-    const hasQ =
-      q && typeof q === "object" && !Array.isArray(q) && Object.keys(q as Record<string, unknown>).length > 0;
-    const requiredOk =
+    const nicheOk = niche.length === 0 || allowedNiche.has(niche);
+    const profileCompleted =
       fnOk &&
-      !!dob &&
+      hasPhoto &&
+      interestsOk &&
+      dob != null &&
       gender.length > 0 &&
-      niche.length > 0 &&
-      allowedNiche.has(niche) &&
-      (interestsList.length >= 5 || hasQ);
+      nicheOk;
 
-    let finalData = data;
-    if (requiredOk && interestsOk) {
-      const { data: data2, error: flagsErr } = await supabase
+    if (profileCompleted !== row.profile_completed) {
+      await auth.admin
         .from("profiles")
-        .update({
-          profile_completed: true,
-          image_upload_status: hasPhoto ? "success" : "pending",
-        })
-        .eq("user_id", user_id)
-        .select("*")
-        .single();
-      if (!flagsErr && data2) finalData = data2;
+        .update({ profile_completed: profileCompleted })
+        .eq("user_id", userId);
+      row.profile_completed = profileCompleted;
     }
 
-    return new Response(
-      JSON.stringify({ success: true, user: finalData, profile_completion: finalData.profile_completion }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    return jsonResponse({ success: true, profile: row });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return jsonResponse({ error: message }, 500);
   }
 });

@@ -1,8 +1,10 @@
+import { FunctionsHttpError } from '@supabase/functions-js';
 import { supabase } from '@/integrations/supabase/client';
+import { logAuthCompletionStep } from '@/lib/onboarding/authCompletionDebug';
 
 /**
  * Payload expected by Edge Function `complete-registration` (see supabase/functions/complete-registration).
- * Email OTP is validated in the client before this is called; the function does not accept an OTP field.
+ * Requires server-verified OTP (`verification_token` from verify-onboarding-otp).
  */
 /** Onboarding fields synced to profiles (Edge admin upsert + client photo merge). */
 export interface CompleteRegistrationProfilePayload {
@@ -23,6 +25,7 @@ export interface CompleteRegistrationProfilePayload {
 export interface CompleteRegistrationBody {
   email: string;
   password: string;
+  verification_token: string;
   firstName?: string;
   lastName?: string;
   referralCode?: string;
@@ -30,57 +33,148 @@ export interface CompleteRegistrationBody {
   profile?: CompleteRegistrationProfilePayload;
 }
 
-function logInvokeError(scope: string, err: unknown) {
-  console.error(`[${scope}] invoke failed`);
-  if (err instanceof Error) {
-    console.error('message:', err.message);
-    console.error('stack:', err.stack);
-    const cause = (err as Error & { cause?: unknown }).cause;
-    if (cause !== undefined) console.error('cause:', cause);
+type EdgePayload = {
+  tokenHash?: string;
+  error?: string;
+  success?: boolean;
+  code?: 'created' | 'already_exists';
+  userId?: string | null;
+  diagnostics?: { stage?: string };
+};
+
+export type RegistrationInvokeSuccess = {
+  ok: true;
+  tokenHash: string;
+  code: 'created' | 'already_exists';
+  userId: string | null;
+};
+
+export type RegistrationInvokeFailure = {
+  ok: false;
+  recoverable: boolean;
+  reason: 'transport' | 'missing_token' | 'server_error';
+  detail?: string;
+};
+
+export type RegistrationInvokeResult = RegistrationInvokeSuccess | RegistrationInvokeFailure;
+
+async function parseEdgeBody(
+  data: unknown,
+  error: unknown,
+): Promise<{ body: EdgePayload | null; httpStatus: number | null }> {
+  if (data && typeof data === 'object') {
+    return { body: data as EdgePayload, httpStatus: null };
   }
-  try {
-    if (err !== null && typeof err === 'object') {
-      console.error('details:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+
+  if (error instanceof FunctionsHttpError) {
+    const res = error.context as Response;
+    const httpStatus = res.status;
+    try {
+      const body = (await res.json()) as EdgePayload;
+      return { body, httpStatus };
+    } catch {
+      return { body: null, httpStatus };
     }
-  } catch {
-    console.error('raw error:', err);
   }
+
+  return { body: null, httpStatus: null };
+}
+
+function isTransportFailure(error: unknown, httpStatus: number | null): boolean {
+  if (httpStatus !== null && httpStatus >= 500) return true;
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (error.name === 'AbortError' || msg.includes('fetch') || msg.includes('network')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function invokeOnce(
+  payload: CompleteRegistrationBody,
+): Promise<{ body: EdgePayload | null; error: unknown; httpStatus: number | null }> {
+  const { data, error } = await supabase.functions.invoke('complete-registration', { body: payload });
+  const parsed = await parseEdgeBody(data, error);
+  return { body: parsed.body, error, httpStatus: parsed.httpStatus };
 }
 
 /**
- * Calls deployed Edge Function `complete-registration` only (no legacy `verify` function).
+ * Calls Edge Function `complete-registration` with mobile-safe parsing and retry.
+ * Does not throw — use recoverable flag for session fallback.
  */
 export async function invokeCompleteRegistration(
   payload: CompleteRegistrationBody,
-): Promise<{ tokenHash: string; code: 'created' | 'already_exists'; userId: string | null }> {
-  const { data, error } = await supabase.functions.invoke('complete-registration', { body: payload });
+): Promise<RegistrationInvokeResult> {
+  logAuthCompletionStep(1, { phase: 'invoke_start', email: payload.email });
 
-  if (error) {
-    logInvokeError('complete-registration', error);
-    throw new Error('registration_failed');
+  let lastError: unknown;
+  let lastBody: EdgePayload | null = null;
+  let lastStatus: number | null = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { body, error, httpStatus } = await invokeOnce(payload);
+    lastError = error;
+    lastBody = body;
+    lastStatus = httpStatus;
+
+    if (!error && body?.tokenHash && !body.error) {
+      logAuthCompletionStep(1, {
+        phase: 'invoke_ok',
+        code: body.code,
+        userId: body.userId,
+        attempt,
+      });
+      return {
+        ok: true,
+        tokenHash: body.tokenHash,
+        code: body.code ?? 'created',
+        userId: body.userId ?? null,
+      };
+    }
+
+    if (!isTransportFailure(error, httpStatus) || attempt === 1) break;
+    logAuthCompletionStep(1, { phase: 'invoke_retry', attempt });
+    await new Promise((r) => setTimeout(r, 400));
   }
 
-  const regPayload = data as {
-    tokenHash?: string;
-    error?: string;
-    success?: boolean;
-    code?: 'created' | 'already_exists';
-    userId?: string | null;
-  } | null;
-
-  if (regPayload?.error) {
-    console.error('[complete-registration] error in JSON body:', regPayload.error, regPayload);
-    throw new Error('registration_failed');
+  if (lastBody?.tokenHash && !lastBody.error) {
+    return {
+      ok: true,
+      tokenHash: lastBody.tokenHash,
+      code: lastBody.code ?? 'created',
+      userId: lastBody.userId ?? null,
+    };
   }
 
-  if (!regPayload?.tokenHash) {
-    console.error('[complete-registration] missing tokenHash. Full body:', JSON.stringify(data));
-    throw new Error('session_token_missing');
+  if (lastBody?.error) {
+    console.error('[complete-registration] error in JSON body:', lastBody.error, lastBody);
+    const recoverable =
+      lastBody.code === 'already_exists' ||
+      lastStatus === 500 ||
+      lastBody.diagnostics?.stage === 'profile_upsert';
+    return {
+      ok: false,
+      recoverable,
+      reason: 'server_error',
+      detail: lastBody.error,
+    };
   }
 
+  if (!lastBody?.tokenHash) {
+    console.error('[complete-registration] missing tokenHash', JSON.stringify(lastBody));
+    return {
+      ok: false,
+      recoverable: isTransportFailure(lastError, lastStatus),
+      reason: 'missing_token',
+    };
+  }
+
+  console.error('[complete-registration] invoke failed', lastError);
   return {
-    tokenHash: regPayload.tokenHash,
-    code: regPayload.code ?? 'created',
-    userId: regPayload.userId ?? null,
+    ok: false,
+    recoverable: isTransportFailure(lastError, lastStatus),
+    reason: 'transport',
+    detail: lastError instanceof Error ? lastError.message : undefined,
   };
 }

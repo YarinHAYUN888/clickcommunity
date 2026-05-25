@@ -213,14 +213,14 @@ export async function finalizeOnboardingProfile(
   if (photoSources.length > 0) {
     try {
       photoUrls = await uploadOnboardingPhotosFromDataUrls(userId, photoSources);
-      imageUploadStatus = photoUrls.length > 0 ? 'success' : 'pending';
+      imageUploadStatus = photoUrls.length > 0 ? 'success' : 'failed';
     } catch (e) {
       if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
-        imageUploadStatus = 'pending';
-        console.error('[finalizeOnboardingProfile] all photos failed — text kept, status pending', e);
+        imageUploadStatus = 'failed';
+        console.error('[finalizeOnboardingProfile] all photos failed — text kept, status failed', e);
       } else {
         console.warn('[finalizeOnboardingProfile] partial photo upload', e);
-        imageUploadStatus = 'pending';
+        imageUploadStatus = 'failed';
       }
     }
 

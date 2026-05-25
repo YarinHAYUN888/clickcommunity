@@ -95,7 +95,7 @@ export function useCurrentUser(): CurrentUser {
                   first_name: firstName || null,
                   last_name: lastName || null,
                   role: 'member',
-                  moderation_status: 'approved',
+                  moderation_status: 'pending',
                   suitability_status: 'active',
                   is_shadow: false,
                   profile_completed: false,

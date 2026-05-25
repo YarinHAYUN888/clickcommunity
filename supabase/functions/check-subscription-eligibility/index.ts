@@ -1,51 +1,63 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import {
+  assertSelfUserId,
+  jsonResponse,
+  optionsOk,
+  requireAuthUser,
+} from "../_shared/edgeAuth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return optionsOk();
+
+  const auth = await requireAuthUser(req);
+  if (!auth.ok) return auth.response;
 
   try {
-    const { user_id } = await req.json();
-    if (!user_id) return new Response(JSON.stringify({ error: "user_id required" }), { status: 400, headers: corsHeaders });
+    const body = await req.json();
+    const forbidden = assertSelfUserId(auth.user.id, body.user_id);
+    if (forbidden) return forbidden;
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const userId = auth.user.id;
+    const supabase = auth.admin;
 
-    // Check attendance
     const { count } = await supabase
       .from("event_registrations")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .in("status", ["registered", "approved"]);
 
     const attendedEvent = (count ?? 0) > 0;
 
-    // Vote score
-    const { data: voteScore } = await supabase.rpc("get_user_vote_score", { p_user_id: user_id });
-    const score = voteScore ?? 0;
+    const { data: voteScoreData } = await supabase.rpc("get_user_vote_score", {
+      p_user_id: userId,
+    });
+    const score = voteScoreData ?? 0;
 
     if (!attendedEvent) {
-      return new Response(JSON.stringify({
-        eligible: false, attended_event: false, vote_score: score, reason: "must_attend_event"
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return jsonResponse({
+        eligible: false,
+        attended_event: false,
+        vote_score: score,
+        reason: "must_attend_event",
+      });
     }
 
     if (score < 3) {
-      return new Response(JSON.stringify({
-        eligible: false, attended_event: true, vote_score: score, reason: "insufficient_votes"
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return jsonResponse({
+        eligible: false,
+        attended_event: true,
+        vote_score: score,
+        reason: "insufficient_votes",
+      });
     }
 
-    return new Response(JSON.stringify({
-      eligible: true, attended_event: true, vote_score: score, reason: null
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return jsonResponse({
+      eligible: true,
+      attended_event: true,
+      vote_score: score,
+      reason: null,
+    });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return jsonResponse({ error: message }, 500);
   }
 });

@@ -50,10 +50,17 @@ Deno.serve(async (req) => {
 
     const { data: meProf, error: meErr } = await supabaseAdmin
       .from("profiles")
-      .select("user_id, date_of_birth, region, interests, gender, suspended, moderation_status")
+      .select("user_id, date_of_birth, region, interests, gender, suspended, moderation_status, suitability_status, is_shadow")
       .eq("user_id", meId)
       .maybeSingle();
-    if (meErr || !meProf || meProf.suspended === true || meProf.moderation_status !== "approved") {
+    if (
+      meErr ||
+      !meProf ||
+      meProf.suspended === true ||
+      meProf.moderation_status !== "approved" ||
+      meProf.suitability_status !== "active" ||
+      meProf.is_shadow === true
+    ) {
       return new Response(JSON.stringify({ error: "not_allowed" }), { status: 403, headers: corsHeaders });
     }
 
@@ -65,10 +72,17 @@ Deno.serve(async (req) => {
     for (const otherId of others) {
       const { data: otProf, error: otErr } = await supabaseAdmin
         .from("profiles")
-        .select("user_id, date_of_birth, region, interests, gender, suspended, moderation_status")
+        .select("user_id, date_of_birth, region, interests, gender, suspended, moderation_status, suitability_status, is_shadow")
         .eq("user_id", otherId)
         .maybeSingle();
-      if (otErr || !otProf || otProf.suspended === true || otProf.moderation_status !== "approved") {
+      if (
+        otErr ||
+        !otProf ||
+        otProf.suspended === true ||
+        otProf.moderation_status !== "approved" ||
+        otProf.suitability_status !== "active" ||
+        otProf.is_shadow === true
+      ) {
         continue;
       }
 

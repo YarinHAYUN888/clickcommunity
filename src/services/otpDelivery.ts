@@ -1,35 +1,13 @@
 /**
- * שליחת OTP ל-webhook של n8n מהדפדפן.
- *
- * CORS: שרת ה-webhook חייב להחזיר כותרות שמאשרות את דומיין האתר,
- * אחרת השליחה תיכשל. חלופה: פרוקסי same-origin (Edge/Netlify וכו').
+ * Onboarding OTP — issued and verified server-side via Edge Functions.
+ * Codes are never stored in the browser; delivery goes through n8n from the Edge only.
  */
 
+import { supabase } from '@/integrations/supabase/client';
 import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
-
-export const DEFAULT_N8N_OTP_WEBHOOK_URL =
-  'https://redagentai.app.n8n.cloud/webhook/send-otp';
-
-function resolveSyncTimeoutMs(): number {
-  const raw = import.meta.env.VITE_OTP_WEBHOOK_TIMEOUT_MS;
-  const parsed = raw ? Number(raw) : NaN;
-  if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  return 35_000;
-}
-
-/** שישה ספרות בטווח [100000, 999999] — קריפטוגרפית אקראי */
-export function generateNumericOtp(): string {
-  const buf = new Uint32Array(2);
-  crypto.getRandomValues(buf);
-  const combined = Number(buf[0]) * 0x100000000 + Number(buf[1]);
-  const range = 900_000;
-  const n = (combined % range) + 100_000;
-  return String(n);
-}
 
 export type VerificationChannel = 'email' | 'phone';
 
-/** שדות פרופיל מה-onboarding לצורך שליחת webhook */
 export interface OnboardingOtpPayloadSource {
   firstName?: string;
   lastName?: string;
@@ -44,107 +22,111 @@ export interface OnboardingOtpPayloadSource {
   instagram?: string;
   tiktok?: string;
   interests?: unknown;
-  photos?: unknown;
 }
 
-/** גוף JSON עקבי ל-n8n; `action` נשמר לתאימות עם flows קיימים */
-export function buildOtpWebhookPayload(
+export interface IssueOtpResult {
+  ok: boolean;
+  challengeId?: string;
+  expiresAt?: string;
+  error?: string;
+}
+
+export interface VerifyOtpResult {
+  ok: boolean;
+  verificationToken?: string;
+  error?: string;
+}
+
+function phoneE164(phone: string): string {
+  const cleaned = phone.replace(/[-\s]/g, '').replace(/^0/, '');
+  return cleaned ? `+972${cleaned}` : '';
+}
+
+export async function issueOnboardingOtp(
   data: OnboardingOtpPayloadSource,
   verificationMethod: VerificationChannel,
-  code: string,
-): Record<string, unknown> {
+): Promise<IssueOtpResult> {
   const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  logOnboardingStep(2, { phase: 'issue_otp_start', method: verificationMethod });
+
+  const { data: res, error } = await supabase.functions.invoke('issue-onboarding-otp', {
+    body: {
+      email: data.email,
+      phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+      verificationMethod,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      gender: data.gender,
+      dateOfBirth: data.dateOfBirth,
+      region: data.region,
+      regionOther: data.regionOther,
+      occupation: data.occupation,
+      bio: data.bio,
+      instagram: data.instagram,
+      tiktok: data.tiktok,
+      interests: data.interests,
+    },
+  });
+
+  if (error) {
+    if (import.meta.env.DEV) console.error('[issue-onboarding-otp]', error);
+    return { ok: false, error: 'issue_failed' };
+  }
+
+  const body = res as { ok?: boolean; challenge_id?: string; expires_at?: string; error?: string };
+  if (!body?.ok || !body.challenge_id) {
+    return { ok: false, error: body?.error ?? 'issue_failed' };
+  }
+
+  logOnboardingStep(2, { phase: 'issue_otp_ok', challengeId: body.challenge_id });
   return {
-    event: 'otp_send',
-    action: 'send',
-    code,
-    verificationMethod,
-    firstName: data.firstName,
-    lastName: data.lastName,
-    email: data.email,
-    phone: `+972${phoneClean}`,
-    gender: data.gender,
-    dateOfBirth: data.dateOfBirth,
-    region: data.region,
-    regionOther: data.regionOther,
-    occupation: data.occupation,
-    bio: data.bio,
-    instagram: data.instagram,
-    tiktok: data.tiktok,
-    interests: data.interests,
-    photos: data.photos,
+    ok: true,
+    challengeId: body.challenge_id,
+    expiresAt: body.expires_at,
   };
 }
 
-export interface SyncOtpWebhookResult {
-  ok: boolean;
-  status: number;
-  error?: string;
-  body?: unknown;
-}
+export async function verifyOnboardingOtp(
+  data: OnboardingOtpPayloadSource,
+  verificationMethod: VerificationChannel,
+  challengeId: string,
+  code: string,
+): Promise<VerifyOtpResult> {
+  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  const { data: res, error } = await supabase.functions.invoke('verify-onboarding-otp', {
+    body: {
+      challenge_id: challengeId,
+      code,
+      email: data.email,
+      phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+      verificationMethod,
+    },
+  });
 
-export function resolveOtpWebhookUrl(): string {
-  return (
-    import.meta.env.VITE_N8N_OTP_WEBHOOK_URL?.trim() || DEFAULT_N8N_OTP_WEBHOOK_URL
-  );
-}
-
-function bodyIndicatesSuccess(body: unknown): boolean {
-  if (!body || typeof body !== 'object') return false;
-  const o = body as Record<string, unknown>;
-  if (o.success === true || o.ok === true) return true;
-  return false;
-}
-
-export async function syncOtpToWebhook(
-  payload: Record<string, unknown>,
-): Promise<SyncOtpWebhookResult> {
-  const url = resolveOtpWebhookUrl();
-  const controller = new AbortController();
-  const timeoutMs = resolveSyncTimeoutMs();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  logOnboardingStep(2, { phase: 'webhook_start', url: url.replace(/\/\/[^/]+/, '//***') });
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    window.clearTimeout(timer);
-
-    let body: unknown;
-    try {
-      const text = await res.text();
-      body = text ? JSON.parse(text) : null;
-    } catch {
-      body = undefined;
-    }
-
-    const ok = res.ok || bodyIndicatesSuccess(body);
-    if (!ok && import.meta.env.DEV) {
-      console.error('[n8n OTP webhook]', res.status, body);
-    }
-
-    logOnboardingStep(2, { phase: 'webhook_done', ok, status: res.status });
-
-    return { ok, status: res.status, body };
-  } catch (e) {
-    window.clearTimeout(timer);
-    const error =
-      e instanceof Error
-        ? e.name === 'AbortError'
-          ? 'timeout'
-          : e.message
-        : 'network_error';
-    if (import.meta.env.DEV) {
-      console.error('[n8n OTP webhook]', error);
-    }
-    logOnboardingStep(2, { phase: 'webhook_error', error });
-    return { ok: false, status: 0, error };
+  if (error) {
+    if (import.meta.env.DEV) console.error('[verify-onboarding-otp]', error);
+    return { ok: false, error: 'verify_failed' };
   }
+
+  const body = res as {
+    ok?: boolean;
+    verification_token?: string;
+    error?: string;
+  };
+
+  if (!body?.ok || !body.verification_token) {
+    return { ok: false, error: body?.error ?? 'otp_invalid' };
+  }
+
+  return { ok: true, verificationToken: body.verification_token };
+}
+
+/** @deprecated Client-side OTP generation removed — use issueOnboardingOtp */
+export function generateNumericOtp(): string {
+  const buf = new Uint32Array(2);
+  crypto.getRandomValues(buf);
+  const combined = Number(buf[0]) * 0x100000000 + Number(buf[1]);
+  return String((combined % 900_000) + 100_000);
 }
 
 /** מחלץ 6 ספרות רצופות מהטקסט (למשל מהלוח) */

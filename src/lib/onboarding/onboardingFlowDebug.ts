@@ -22,6 +22,8 @@ export type OnboardingFlowErrorCode =
   | 'profile_save_failed'
   | 'photo_upload_partial'
   | 'onboarding_finalize_partial'
+  | 'auth_completion_sync_pending'
+  | 'registration_invoke_transport'
   | 'missing_credentials'
   | 'unknown';
 

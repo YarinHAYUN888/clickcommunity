@@ -1,19 +1,28 @@
+import { jsonResponse, optionsOk, requireWebhookSecret } from "../_shared/edgeAuth.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-webhook-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-const WEBHOOK_URL = "https://redagentai.app.n8n.cloud/webhook/send-otp";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  const secretErr = requireWebhookSecret(req);
+  if (secretErr) return secretErr;
+
   try {
     const body = await req.json();
-    const action = body.action || "send"; // "send" or "verify"
+    const action = body.action || "send";
+
+    const n8nUrl = Deno.env.get("N8N_OTP_WEBHOOK_URL")?.trim();
+    if (!n8nUrl) {
+      return jsonResponse({ error: "N8N_OTP_WEBHOOK_URL not configured" }, 503);
+    }
 
     const payload = {
       action,
@@ -30,22 +39,28 @@ Deno.serve(async (req) => {
       instagram: body.instagram || "",
       tiktok: body.tiktok || "",
       interests: body.interests || [],
-      photos: body.photos || [],
       verificationMethod: body.verificationMethod || "",
-      code: body.code || "",
       registeredAt: new Date().toISOString(),
     };
 
-    console.log(`[${action}] Sending to ${WEBHOOK_URL}`, JSON.stringify(payload));
+    console.log(`[registration-webhook] action=${action} email=${payload.email ? "[set]" : "[empty]"}`);
 
-    const webhookResponse = await fetch(WEBHOOK_URL, {
+    const webhookResponse = await fetch(n8nUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
     const responseText = await webhookResponse.text();
-    console.log(`Webhook response: status=${webhookResponse.status}, body=${responseText}`);
+    if (!webhookResponse.ok) {
+      console.error("[registration-webhook] n8n failed", webhookResponse.status);
+      return jsonResponse({
+        ok: false,
+        fallback: true,
+        status: webhookResponse.status,
+        error: "Webhook failed",
+      });
+    }
 
     let parsedBody: unknown = null;
     try {
@@ -54,30 +69,13 @@ Deno.serve(async (req) => {
       parsedBody = responseText || null;
     }
 
-    if (!webhookResponse.ok) {
-      console.error("Webhook error", webhookResponse.status, responseText);
-      return new Response(JSON.stringify({
-        ok: false,
-        status: webhookResponse.status,
-        error: "Webhook failed",
-        data: parsedBody,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ ok: true, data: parsedBody }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: true, fallback: false, data: parsedBody });
   } catch (error) {
-    console.error("Registration webhook error", error);
-    return new Response(JSON.stringify({
+    console.error("[registration-webhook] unexpected", error);
+    return jsonResponse({
       ok: false,
+      fallback: true,
       error: error instanceof Error ? error.message : "Unexpected error",
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

@@ -24,6 +24,7 @@ After merge:
 ## iPhone Safari
 
 - [ ] Same flow as desktop
+- [ ] Correct OTP after mobile network hiccup: user is redirected to `/pending-review` (or approved route) without "השרת לא הצליח ליצור את החשבון"
 - [ ] Refresh on OTP screen → code still accepted (sessionStorage `clicks_otp_pending`)
 - [ ] Session establishes without `session_restore_failed` toast
 

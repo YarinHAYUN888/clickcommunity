@@ -1,34 +1,36 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { REFERRALS_PER_MONTH_DEFAULT } from "../_shared/points.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import {
+  assertSelfUserId,
+  jsonResponse,
+  optionsOk,
+  requireAuthUser,
+} from "../_shared/edgeAuth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return optionsOk();
+
+  const auth = await requireAuthUser(req);
+  if (!auth.ok) return auth.response;
 
   try {
-    const { user_id } = await req.json();
-    if (!user_id) return new Response(JSON.stringify({ error: "user_id required" }), { status: 400, headers: corsHeaders });
+    const body = await req.json();
+    const forbidden = assertSelfUserId(auth.user.id, body.user_id);
+    if (forbidden) return forbidden;
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const userId = auth.user.id;
+    const supabase = auth.admin;
 
     const { count: eventsAttended } = await supabase
       .from("event_registrations")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .in("status", ["registered", "approved"]);
 
     const today = new Date().toISOString().split("T")[0];
     const { data: nextEventReg } = await supabase
       .from("event_registrations")
       .select("event_id, events(id, name, date)")
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .in("status", ["registered", "approved"])
       .gte("events.date", today)
       .order("events(date)", { ascending: true })
@@ -36,14 +38,16 @@ Deno.serve(async (req) => {
 
     let nextEvent = null;
     if (nextEventReg && nextEventReg.length > 0) {
-      const ev = (nextEventReg[0] as any).events;
+      const ev = (nextEventReg[0] as { events?: { id: string; name: string; date: string } }).events;
       if (ev) nextEvent = { id: ev.id, name: ev.name, date: ev.date };
     }
 
-    const { data: eventsThisMonthData } = await supabase.rpc("count_events_this_month", { p_user_id: user_id });
+    const { data: eventsThisMonthData } = await supabase.rpc("count_events_this_month", {
+      p_user_id: userId,
+    });
     const eventsThisMonth = eventsThisMonthData ?? 0;
 
-    const { data: voteScoreData } = await supabase.rpc("get_user_vote_score", { p_user_id: user_id });
+    const { data: voteScoreData } = await supabase.rpc("get_user_vote_score", { p_user_id: userId });
     const voteScore = voteScoreData ?? 0;
 
     const { data: profile } = await supabase
@@ -51,34 +55,40 @@ Deno.serve(async (req) => {
       .select(
         "profile_completion, status, role, points, referral_code, referral_disabled, referral_cap_override",
       )
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .single();
 
     let referralsThisMonth = 0;
     if (profile?.role === "member") {
-      const { data: refData } = await supabase.rpc("count_referrals_this_month", { p_user_id: user_id });
+      const { data: refData } = await supabase.rpc("count_referrals_this_month", {
+        p_user_id: userId,
+      });
       referralsThisMonth = refData ?? 0;
     }
 
     const referralCap = profile?.referral_cap_override ?? REFERRALS_PER_MONTH_DEFAULT;
-    const referralsRemaining =
-      profile?.referral_disabled ? 0 : Math.max(0, referralCap - referralsThisMonth);
+    const referralsRemaining = profile?.referral_disabled
+      ? 0
+      : Math.max(0, referralCap - referralsThisMonth);
 
     const { count: referralsJoined } = await supabase
       .from("referrals")
       .select("*", { count: "exact", head: true })
-      .eq("referrer_id", user_id)
+      .eq("referrer_id", userId)
       .not("referred_user_id", "is", null);
 
     const { data: refPtsRows } = await supabase
       .from("points_history")
       .select("amount")
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .eq("type", "referral_signup");
 
-    const referralPointsEarned = (refPtsRows ?? []).reduce((s, r) => s + (r.amount ?? 0), 0);
+    const referralPointsEarned = (refPtsRows ?? []).reduce(
+      (s, r) => s + (r.amount ?? 0),
+      0,
+    );
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       events_attended: eventsAttended ?? 0,
       next_event: nextEvent,
       events_this_month: eventsThisMonth,
@@ -93,10 +103,9 @@ Deno.serve(async (req) => {
       points: profile?.points ?? 0,
       referrals_joined_count: referralsJoined ?? 0,
       referral_points_earned: referralPointsEarned,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return jsonResponse({ error: message }, 500);
   }
 });

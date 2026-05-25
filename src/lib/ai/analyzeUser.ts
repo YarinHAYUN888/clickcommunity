@@ -212,75 +212,7 @@ function parseJsonResponse(raw: string): AnalyzeUserResult | null {
   }
 }
 
+/** Client-side suitability uses local heuristics only — no API keys in the browser bundle. */
 export async function analyzeUser(input: ProfileAnalysisInput): Promise<AnalyzeUserResult> {
-  const key = import.meta.env.VITE_OPENAI_API_KEY?.trim();
-  const userContent = `${PROMPT}\n\nProfile JSON:\n${JSON.stringify(input, null, 2)}`;
-
-  if (!key) {
-    return mockAnalyze(input);
-  }
-
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You enforce strict community quality. Label "not_fit" for trolls, obvious tests, nonsense, or incoherent junk. Use "borderline" only when mostly fine but uncertain. "fit" only for clearly genuine profiles.',
-          },
-          { role: 'user', content: userContent },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.15,
-      }),
-    });
-
-    if (!res.ok) {
-      console.warn('analyzeUser OpenAI HTTP', res.status);
-      return mockAnalyze(input);
-    }
-
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const raw = data.choices?.[0]?.message?.content;
-    if (!raw) return mockAnalyze(input);
-
-    const parsed = parseJsonResponse(raw);
-    if (!parsed) return mockAnalyze(input);
-
-    const local = collectLocalRiskReasons(input);
-    if (local.length >= 2 && parsed.label === 'fit') {
-      return {
-        score: Math.min(parsed.score, 44),
-        label: 'not_fit',
-        reasons: [...parsed.reasons, ...local],
-        decision: 'rejected',
-        confidence: Math.max(parsed.confidence, 0.75),
-        reason: 'local_risk_override_high',
-        flags: [...parsed.flags, ...local],
-      };
-    }
-    if (local.length === 1 && parsed.label === 'fit' && parsed.score > 60) {
-      return {
-        score: Math.min(parsed.score, 55),
-        label: 'borderline',
-        reasons: [...parsed.reasons, ...local],
-        decision: 'pending',
-        confidence: Math.max(parsed.confidence, 0.6),
-        reason: 'local_risk_override_medium',
-        flags: [...parsed.flags, ...local],
-      };
-    }
-
-    return parsed;
-  } catch (e) {
-    console.warn('analyzeUser error', e);
-    return mockAnalyze(input);
-  }
+  return mockAnalyze(input);
 }
