@@ -1,5 +1,7 @@
 const OTP_SALT = Deno.env.get("OTP_HASH_SALT") ?? "clicks-onboarding-otp-v1";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function generateNumericOtp(): string {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
@@ -23,17 +25,31 @@ export function generateVerificationToken(): string {
     .join("");
 }
 
+export function isValidEmail(email: string): boolean {
+  return EMAIL_RE.test(email.trim().toLowerCase());
+}
+
+/** Channel-strict: email path never falls back to phone and vice versa. */
 export function normalizeIdentifier(
   email?: string,
   phone?: string,
   channel?: string,
 ): string | null {
+  const ch = typeof channel === "string" ? channel.trim().toLowerCase() : "";
   const e = typeof email === "string" ? email.trim().toLowerCase() : "";
-  if (channel === "email" || (!channel && e)) {
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return `email:${e}`;
-  }
   const p = typeof phone === "string" ? phone.trim() : "";
+
+  if (ch === "email") {
+    if (isValidEmail(e)) return `email:${e}`;
+    return null;
+  }
+
+  if (ch === "phone") {
+    if (p && /^\+9725\d{8}$/.test(p)) return `phone:${p}`;
+    return null;
+  }
+
+  if (e && isValidEmail(e)) return `email:${e}`;
   if (p && /^\+9725\d{8}$/.test(p)) return `phone:${p}`;
-  if (e) return `email:${e}`;
   return null;
 }

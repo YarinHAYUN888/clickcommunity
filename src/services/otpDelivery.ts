@@ -3,10 +3,21 @@
  * Codes are never stored in the browser; delivery goes through n8n from the Edge only.
  */
 
+import { FunctionsHttpError } from '@supabase/functions-js';
 import { supabase } from '@/integrations/supabase/client';
+import { logEmailOtpStep } from '@/lib/onboarding/emailOtpDebug';
 import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
 
 export type VerificationChannel = 'email' | 'phone';
+
+/** @deprecated Legacy webhook result type for classifyOtpWebhookFailure */
+export type SyncOtpWebhookResult = {
+  ok: boolean;
+  status?: number;
+  error?: string;
+};
+
+export type OtpDeliveryStatus = 'sent' | 'uncertain' | 'skipped_no_webhook' | string;
 
 export interface OnboardingOtpPayloadSource {
   firstName?: string;
@@ -28,7 +39,12 @@ export interface IssueOtpResult {
   ok: boolean;
   challengeId?: string;
   expiresAt?: string;
+  /** Edge error_code or legacy error string */
   error?: string;
+  errorCode?: string;
+  deliveryStatus?: OtpDeliveryStatus;
+  /** Challenge created but email/SMS dispatch uncertain — still proceed to code entry */
+  deliveryUncertain?: boolean;
 }
 
 export interface VerifyOtpResult {
@@ -37,53 +53,174 @@ export interface VerifyOtpResult {
   error?: string;
 }
 
+type IssueOtpEdgeBody = {
+  ok?: boolean;
+  challenge_id?: string;
+  expires_at?: string;
+  error?: string;
+  error_code?: string;
+  delivery_status?: OtpDeliveryStatus;
+  delivery_channel?: string;
+  message?: string;
+  retry_after_sec?: number;
+};
+
 function phoneE164(phone: string): string {
   const cleaned = phone.replace(/[-\s]/g, '').replace(/^0/, '');
   return cleaned ? `+972${cleaned}` : '';
 }
 
+/** Build invoke body — email and SMS payloads are isolated. */
+export function buildIssueOtpInvokeBody(
+  data: OnboardingOtpPayloadSource,
+  verificationMethod: VerificationChannel,
+  registrationSessionId?: string,
+): Record<string, unknown> {
+  const shared = {
+    verificationMethod,
+    firstName: data.firstName,
+    lastName: data.lastName,
+    gender: data.gender,
+    dateOfBirth: data.dateOfBirth,
+    region: data.region,
+    regionOther: data.regionOther,
+    occupation: data.occupation,
+    bio: data.bio,
+    instagram: data.instagram,
+    tiktok: data.tiktok,
+    interests: data.interests,
+    registration_session_id: registrationSessionId,
+  };
+
+  if (verificationMethod === 'email') {
+    return {
+      ...shared,
+      email: (data.email ?? '').trim().toLowerCase(),
+    };
+  }
+
+  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  return {
+    ...shared,
+    phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+  };
+}
+
+export function buildVerifyOtpInvokeBody(
+  data: OnboardingOtpPayloadSource,
+  verificationMethod: VerificationChannel,
+  challengeId: string,
+  code: string,
+  registrationSessionId?: string,
+): Record<string, unknown> {
+  const base = {
+    challenge_id: challengeId,
+    code,
+    verificationMethod,
+    registration_session_id: registrationSessionId,
+  };
+
+  if (verificationMethod === 'email') {
+    return { ...base, email: (data.email ?? '').trim().toLowerCase() };
+  }
+
+  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  return {
+    ...base,
+    phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+  };
+}
+
+async function parseIssueOtpEdgeBody(
+  data: unknown,
+  error: unknown,
+): Promise<{ body: IssueOtpEdgeBody | null; httpStatus: number | null }> {
+  if (data && typeof data === 'object') {
+    return { body: data as IssueOtpEdgeBody, httpStatus: null };
+  }
+
+  if (error instanceof FunctionsHttpError) {
+    const res = error.context as Response;
+    const httpStatus = res.status;
+    try {
+      const body = (await res.json()) as IssueOtpEdgeBody;
+      return { body, httpStatus };
+    } catch {
+      return { body: null, httpStatus };
+    }
+  }
+
+  return { body: null, httpStatus: null };
+}
+
+function isTransportFailure(error: unknown, httpStatus: number | null): boolean {
+  if (httpStatus !== null && httpStatus >= 500) return true;
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (error.name === 'AbortError' || msg.includes('fetch') || msg.includes('network')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function issueOnboardingOtp(
   data: OnboardingOtpPayloadSource,
   verificationMethod: VerificationChannel,
+  registrationSessionId?: string,
 ): Promise<IssueOtpResult> {
-  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  const invokeBody = buildIssueOtpInvokeBody(data, verificationMethod, registrationSessionId);
+
+  if (verificationMethod === 'email') {
+    logEmailOtpStep(2, { email: invokeBody.email, hasSession: !!registrationSessionId });
+    logEmailOtpStep(3, { function: 'issue-onboarding-otp' });
+  }
+
   logOnboardingStep(2, { phase: 'issue_otp_start', method: verificationMethod });
 
   const { data: res, error } = await supabase.functions.invoke('issue-onboarding-otp', {
-    body: {
-      email: data.email,
-      phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
-      verificationMethod,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      gender: data.gender,
-      dateOfBirth: data.dateOfBirth,
-      region: data.region,
-      regionOther: data.regionOther,
-      occupation: data.occupation,
-      bio: data.bio,
-      instagram: data.instagram,
-      tiktok: data.tiktok,
-      interests: data.interests,
-    },
+    body: invokeBody,
   });
 
-  if (error) {
-    if (import.meta.env.DEV) console.error('[issue-onboarding-otp]', error);
-    return { ok: false, error: 'issue_failed' };
+  const { body, httpStatus } = await parseIssueOtpEdgeBody(res, error);
+
+  if (verificationMethod === 'email') {
+    logEmailOtpStep(4, {
+      ok: body?.ok,
+      challengeId: body?.challenge_id,
+      errorCode: body?.error_code ?? body?.error,
+      httpStatus,
+      hasInvokeError: !!error,
+    });
   }
 
-  const body = res as { ok?: boolean; challenge_id?: string; expires_at?: string; error?: string };
-  if (!body?.ok || !body.challenge_id) {
-    return { ok: false, error: body?.error ?? 'issue_failed' };
+  if (body?.ok === true && body.challenge_id) {
+    const deliveryStatus = body.delivery_status;
+    const deliveryUncertain =
+      deliveryStatus === 'uncertain' || deliveryStatus === 'skipped_no_webhook';
+
+    if (verificationMethod === 'email') {
+      logEmailOtpStep(5, { deliveryStatus, deliveryUncertain });
+    }
+
+    logOnboardingStep(2, { phase: 'issue_otp_ok', challengeId: body.challenge_id, deliveryStatus });
+    return {
+      ok: true,
+      challengeId: body.challenge_id,
+      expiresAt: body.expires_at,
+      deliveryStatus,
+      deliveryUncertain,
+    };
   }
 
-  logOnboardingStep(2, { phase: 'issue_otp_ok', challengeId: body.challenge_id });
-  return {
-    ok: true,
-    challengeId: body.challenge_id,
-    expiresAt: body.expires_at,
-  };
+  const errorCode =
+    body?.error_code ?? body?.error ?? (isTransportFailure(error, httpStatus) ? 'otp_delivery_timeout' : 'issue_failed');
+
+  if (import.meta.env.DEV) {
+    console.error('[issue-onboarding-otp]', { errorCode, httpStatus, error });
+  }
+
+  return { ok: false, error: errorCode, errorCode };
 }
 
 export async function verifyOnboardingOtp(
@@ -91,34 +228,38 @@ export async function verifyOnboardingOtp(
   verificationMethod: VerificationChannel,
   challengeId: string,
   code: string,
+  registrationSessionId?: string,
 ): Promise<VerifyOtpResult> {
-  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
   const { data: res, error } = await supabase.functions.invoke('verify-onboarding-otp', {
-    body: {
-      challenge_id: challengeId,
-      code,
-      email: data.email,
-      phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
-      verificationMethod,
-    },
+    body: buildVerifyOtpInvokeBody(data, verificationMethod, challengeId, code, registrationSessionId),
   });
+
+  if (res && typeof res === 'object') {
+    const body = res as { ok?: boolean; verification_token?: string; error?: string };
+    if (body?.ok && body.verification_token) {
+      return { ok: true, verificationToken: body.verification_token };
+    }
+    if (body?.error) {
+      return { ok: false, error: body.error };
+    }
+  }
+
+  if (error instanceof FunctionsHttpError) {
+    try {
+      const res = error.context as Response;
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) return { ok: false, error: body.error };
+    } catch {
+      /* ignore */
+    }
+  }
 
   if (error) {
     if (import.meta.env.DEV) console.error('[verify-onboarding-otp]', error);
     return { ok: false, error: 'verify_failed' };
   }
 
-  const body = res as {
-    ok?: boolean;
-    verification_token?: string;
-    error?: string;
-  };
-
-  if (!body?.ok || !body.verification_token) {
-    return { ok: false, error: body?.error ?? 'otp_invalid' };
-  }
-
-  return { ok: true, verificationToken: body.verification_token };
+  return { ok: false, error: 'otp_invalid' };
 }
 
 /** @deprecated Client-side OTP generation removed — use issueOnboardingOtp */

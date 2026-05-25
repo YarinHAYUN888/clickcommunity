@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { analyzeUser, type ProfileAnalysisInput } from '@/lib/ai/analyzeUser';
+import { analyzeUser, type ProfileAnalysisInput, type AnalyzeUserResult } from '@/lib/ai/analyzeUser';
 import { analyzePrimaryPhotos } from '@/lib/ai/analyzeImage';
 import { runDecisionEngine } from '@/lib/user/decisionEngine';
 
@@ -8,27 +8,54 @@ export interface RunUserAnalysisPayload extends ProfileAnalysisInput {
   photos?: string[];
 }
 
+async function analyzeViaEdge(
+  profileData: RunUserAnalysisPayload,
+  authUserId: string,
+): Promise<AnalyzeUserResult | null> {
+  const { data, error } = await supabase.functions.invoke('analyze-registration-suitability', {
+    body: {
+      user_id: authUserId,
+      profile: profileData,
+    },
+  });
+  if (error) {
+    if (import.meta.env.DEV) console.warn('[analyze-registration-suitability]', error);
+    return null;
+  }
+  const body = data as { ok?: boolean; result?: AnalyzeUserResult };
+  if (!body?.ok || !body.result) return null;
+  const r = body.result;
+  if (
+    typeof r.score === 'number' &&
+    (r.label === 'fit' || r.label === 'borderline' || r.label === 'not_fit')
+  ) {
+    return r;
+  }
+  return null;
+}
+
 /**
  * After OTP: AI + image checks, persist suitability fields on profiles (by auth user_id).
  */
-export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authUserId: string): Promise<void> {
-  console.info('[runUserAnalysis] start', { authUserId });
-  const [aiResult, imageResult] = await Promise.all([
-    analyzeUser({
-      firstName: profileData.firstName,
-      lastName: profileData.lastName,
-      bio: profileData.bio,
-      occupation: profileData.occupation,
-      interests: profileData.interests,
-      region: profileData.region,
-      regionOther: profileData.regionOther,
-      instagram: profileData.instagram,
-      tiktok: profileData.tiktok,
-      gender: profileData.gender,
-      questionnaireResponses: profileData.questionnaireResponses,
-    }),
-    analyzePrimaryPhotos(profileData.photos || []),
-  ]);
+export async function runUserAnalysis(
+  profileData: RunUserAnalysisPayload,
+  authUserId: string,
+): Promise<void> {
+  if (import.meta.env.DEV) console.info('[runUserAnalysis] start', { authUserId });
+
+  let aiResult: AnalyzeUserResult;
+  if (import.meta.env.DEV) {
+    const edge = await analyzeViaEdge(profileData, authUserId);
+    aiResult = edge ?? (await analyzeUser(profileData));
+  } else {
+    const edge = await analyzeViaEdge(profileData, authUserId);
+    if (!edge) {
+      throw new Error('suitability_analysis_unavailable');
+    }
+    aiResult = edge;
+  }
+
+  const imageResult = await analyzePrimaryPhotos(profileData.photos || []);
 
   const decision = runDecisionEngine({
     label: aiResult.label,
@@ -41,8 +68,8 @@ export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authU
     decision.status === 'active'
       ? 'approved'
       : decision.status === 'blocked'
-      ? 'rejected'
-      : 'pending';
+        ? 'rejected'
+        : 'pending';
 
   const { error } = await supabase
     .from('profiles')
@@ -62,5 +89,7 @@ export async function runUserAnalysis(profileData: RunUserAnalysisPayload, authU
     console.error('runUserAnalysis update failed:', error);
     throw error;
   }
-  console.info('[runUserAnalysis] success', { authUserId, moderationStatus, suitability: decision.status });
+  if (import.meta.env.DEV) {
+    console.info('[runUserAnalysis] success', { authUserId, moderationStatus, suitability: decision.status });
+  }
 }

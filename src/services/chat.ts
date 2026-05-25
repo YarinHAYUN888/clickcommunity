@@ -353,13 +353,13 @@ export function subscribeToMessages(chatId: string, onMessage: (msg: MessageRow)
 
 export async function sendMessage(chatId: string, content: string) {
   const payload = { chat_id: chatId, content };
-  console.log('SEND MESSAGE PAYLOAD:', payload);
+  if (import.meta.env.DEV) console.log('SEND MESSAGE PAYLOAD:', payload);
 
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session?.user) {
-    console.error('SEND MESSAGE ERROR:', new Error('No active session'));
+    if (import.meta.env.DEV) console.error('SEND MESSAGE ERROR:', new Error('No active session'));
     throw new Error('Not authenticated');
   }
 
@@ -368,13 +368,13 @@ export async function sendMessage(chatId: string, content: string) {
   });
 
   if (error) {
-    console.error('SEND MESSAGE ERROR:', error, data);
+    if (import.meta.env.DEV) console.error('SEND MESSAGE ERROR:', error, data);
     throw error;
   }
 
   if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
     const msg = String((data as { error: string }).error);
-    console.error('SEND MESSAGE ERROR:', msg);
+    if (import.meta.env.DEV) console.error('SEND MESSAGE ERROR:', msg);
     throw new Error(msg);
   }
 

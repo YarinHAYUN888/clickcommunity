@@ -1,15 +1,31 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import {
   assertSelfUserId,
   jsonResponse,
   optionsOk,
   requireAuthUser,
 } from "../_shared/edgeAuth.ts";
+import { checkRateLimit } from "../_shared/securityRateLimit.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return optionsOk();
 
   const auth = await requireAuthUser(req);
   if (!auth.ok) return auth.response;
+
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const rate = await checkRateLimit(admin, {
+    action: "update_profile",
+    key: auth.user.id,
+    maxCount: 30,
+    windowMs: 60 * 1000,
+  });
+  if (!rate.allowed) {
+    return jsonResponse({ error: "rate_limited" }, 429);
+  }
 
   try {
     const body = await req.json();

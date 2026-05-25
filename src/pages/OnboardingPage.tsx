@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles } from 'lucide-react';
+import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles, Lock } from 'lucide-react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { LIFE_NICHE_OPTIONS, isValidLifeNiche } from '@/data/lifeNiche';
 import { IntroductionQuestionnaireStep } from '@/components/onboarding/IntroductionQuestionnaireStep';
@@ -17,12 +17,16 @@ import {
   extractSixDigitCode,
   issueOnboardingOtp,
   verifyOnboardingOtp,
+  type IssueOtpResult,
 } from '@/services/otpDelivery';
+import { logEmailOtpStep } from '@/lib/onboarding/emailOtpDebug';
 import { logOnboardingStep } from '@/lib/onboarding/onboardingFlowDebug';
 import {
   clearPendingOtp,
   errorCodeFromMessage,
   getHebrewOnboardingMessage,
+  mapEdgeOtpError,
+  mapIssueOtpError,
   persistPendingOtpChallenge,
   readPendingOtpChallenge,
   shouldShowRegistrationFailed,
@@ -868,10 +872,11 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 // ---- STEP 6: Verify ----
 function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
   const navigate = useNavigate();
-  const { voiceIntroDraftRef, photosDraftRef } = useOnboarding();
-  const [method, setMethod] = useState<'phone' | 'email' | ''>(() =>
-    data.verificationMethod === 'phone' || data.verificationMethod === 'email' ? data.verificationMethod : '',
+  const { voiceIntroDraftRef, photosDraftRef, getPassword } = useOnboarding();
+  const registrationSessionIdRef = useRef(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()),
   );
+  const [method, setMethod] = useState<'phone' | 'email' | ''>('email');
   const [codeSent, setCodeSent] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [verifyError, setVerifyError] = useState('');
@@ -883,13 +888,17 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   const [sendError, setSendError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const challengeIdRef = useRef<string>(readPendingOtpChallenge() ?? '');
+  const sendInFlightRef = useRef(false);
   const lastRegistrationCodeRef = useRef<'created' | 'already_exists' | undefined>(undefined);
+  const [deliveryInfo, setDeliveryInfo] = useState('');
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((data.email ?? '').trim());
 
   useEffect(() => {
-    if (data.verificationMethod === 'phone' || data.verificationMethod === 'email') {
-      setMethod(data.verificationMethod);
+    if (data.verificationMethod === 'phone') {
+      updateData({ verificationMethod: 'email' });
     }
-  }, [data.verificationMethod]);
+    setMethod('email');
+  }, [data.verificationMethod, updateData]);
 
   useEffect(() => {
     try {
@@ -979,7 +988,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   }, [codeSent, resendTimer]);
 
   const buildPostOtpInputs = useCallback(() => {
-    const password = data.password?.trim();
+    const password = getPassword().trim();
     const email = data.email?.trim().toLowerCase();
     if (!password || !email) {
       throw new Error('missing_credentials');
@@ -995,40 +1004,62 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       onboardingPhotos,
       draft,
     };
-  }, [data, photosDraftRef]);
+  }, [data, photosDraftRef, getPassword]);
+
+  const applyOtpIssueSuccess = useCallback(
+    (result: IssueOtpResult) => {
+      if (!result.challengeId) return;
+      challengeIdRef.current = result.challengeId;
+      persistPendingOtpChallenge(result.challengeId);
+      setSendError('');
+      setDeliveryInfo(
+        result.deliveryUncertain ? getHebrewOnboardingMessage('otp_sent_uncertain') : '',
+      );
+      setCodeSent(true);
+      setResendTimer(60);
+      updateData({ verificationMethod: method });
+      if (method === 'email') logEmailOtpStep(6, { challengeId: result.challengeId });
+      setTimeout(() => inputRefs.current[0]?.focus(), 350);
+    },
+    [method, updateData],
+  );
 
   const handleSendCode = useCallback(async () => {
-    if (!method) return;
+    if (!method || sending || sendInFlightRef.current) return;
     setSendError('');
+    setDeliveryInfo('');
     if (method === 'phone' && !phoneLooksValid) {
       setSendError('נדרש מספר טלפון ישראלי תקין. חזרו לשלב יצירת החשבון.');
       return;
     }
+    if (method === 'email') {
+      logEmailOtpStep(1, { email: data.email });
+      if (!emailValid) {
+        setSendError(getHebrewOnboardingMessage('otp_email_invalid'));
+        return;
+      }
+    }
+
+    sendInFlightRef.current = true;
     setSending(true);
 
     try {
-      const result = await issueOnboardingOtp(data, method);
+      const result = await issueOnboardingOtp(data, method, registrationSessionIdRef.current);
 
       if (!result.ok || !result.challengeId) {
-        setSendError(getHebrewOnboardingMessage('otp_webhook_failed'));
-        setSending(false);
+        setSendError(getHebrewOnboardingMessage(mapIssueOtpError(result.errorCode ?? result.error)));
         return;
       }
 
-      challengeIdRef.current = result.challengeId;
-      persistPendingOtpChallenge(result.challengeId);
-
-      setSendError('');
-      setCodeSent(true);
-      setResendTimer(60);
-      updateData({ verificationMethod: method });
-      setTimeout(() => inputRefs.current[0]?.focus(), 350);
+      applyOtpIssueSuccess(result);
     } catch (e) {
       console.error('Send code exception:', e);
       setSendError(getHebrewOnboardingMessage('otp_webhook_network'));
+    } finally {
+      sendInFlightRef.current = false;
+      setSending(false);
     }
-    setSending(false);
-  }, [method, updateData, data, phoneLooksValid]);
+  }, [method, updateData, data, phoneLooksValid, emailValid, sending, applyOtpIssueSuccess]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -1071,13 +1102,15 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         return;
       }
 
-      const otpVerify = await verifyOnboardingOtp(data, method as 'email' | 'phone', challengeId, code);
+      const otpVerify = await verifyOnboardingOtp(
+        data,
+        method as 'email' | 'phone',
+        challengeId,
+        code,
+        registrationSessionIdRef.current,
+      );
       if (!otpVerify.ok || !otpVerify.verificationToken) {
-        const errCode =
-          otpVerify.error === 'otp_expired'
-            ? 'otp_code_invalid'
-            : 'otp_code_invalid';
-        setVerifyError(getHebrewOnboardingMessage(errCode));
+        setVerifyError(getHebrewOnboardingMessage(mapEdgeOtpError(otpVerify.error)));
         setShakeOtp(true);
         setOtp(['', '', '', '', '', '']);
         setTimeout(() => inputRefs.current[0]?.focus(), 350);
@@ -1242,25 +1275,38 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
   const handleResend = async () => {
     if (method !== 'email' && method !== 'phone') return;
+    if (sending || sendInFlightRef.current) return;
     if (method === 'phone' && !phoneLooksValid) {
       setVerifyError('נדרש מספר טלפון מלא. חזרו לשלב יצירת החשבון.');
+      return;
+    }
+    if (method === 'email' && !emailValid) {
+      setVerifyError(getHebrewOnboardingMessage('otp_email_invalid'));
       return;
     }
     setOtp(['', '', '', '', '', '']);
     setVerifyError('');
     setResendTimer(60);
+    sendInFlightRef.current = true;
+    setSending(true);
     try {
-      const result = await issueOnboardingOtp(data, method);
+      const result = await issueOnboardingOtp(data, method, registrationSessionIdRef.current);
       if (!result.ok || !result.challengeId) {
-        setVerifyError(getHebrewOnboardingMessage('otp_webhook_failed'));
+        setVerifyError(getHebrewOnboardingMessage(mapIssueOtpError(result.errorCode ?? result.error)));
       } else {
         challengeIdRef.current = result.challengeId;
         persistPendingOtpChallenge(result.challengeId);
+        setDeliveryInfo(
+          result.deliveryUncertain ? getHebrewOnboardingMessage('otp_sent_uncertain') : '',
+        );
         inputRefs.current[0]?.focus();
       }
     } catch (e) {
       console.error('Resend exception:', e);
       setVerifyError(getHebrewOnboardingMessage('otp_webhook_network'));
+    } finally {
+      sendInFlightRef.current = false;
+      setSending(false);
     }
   };
 
@@ -1281,40 +1327,55 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         {inviteBanner}
         <div>
           <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">אימות החשבון</h2>
-          <p className="text-muted-foreground text-base mt-2">בחר/י איך לקבל את קוד האימות</p>
+          <p className="text-muted-foreground text-base mt-2">קוד האימות יישלח לאימייל שלך</p>
         </div>
 
         <div className="space-y-3">
-          {(['email', 'phone'] as const).map(m => {
-            const isSelected = method === m;
-            const label =
-              m === 'email'
-                ? `📧 אימייל — ${data.email}`
-                : phoneLooksValid
-                  ? `📱 SMS — +972${phoneClean}`
-                  : '📱 SMS — חסר מספר טלפון (חזרו לשלב יצירת החשבון)';
-            return (
-              <motion.button key={m} whileTap={{ scale: 0.97 }} onClick={() => setMethod(m)}
-                className="w-full h-14 rounded-[16px] px-4 text-start text-base font-medium transition-all flex items-center gap-3"
-                style={{
-                  background: isSelected ? 'hsl(var(--color-primary-ultra-light))' : 'hsl(var(--card))',
-                  border: `2px solid ${isSelected ? 'hsl(var(--color-primary))' : 'hsl(var(--border))'}`,
-                  color: isSelected ? 'hsl(var(--color-primary))' : 'hsl(var(--foreground))',
-                }}>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-primary' : 'border-muted-foreground/40'}`}>
-                  {isSelected && <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'hsl(var(--color-primary))' }} />}
-                </div>
-                {label}
-              </motion.button>
-            );
-          })}
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setMethod('email')}
+            className="w-full h-14 rounded-[16px] px-4 text-start text-base font-medium transition-all flex items-center gap-3"
+            style={{
+              background: 'hsl(var(--color-primary-ultra-light))',
+              border: '2px solid hsl(var(--color-primary))',
+              color: 'hsl(var(--color-primary))',
+            }}
+          >
+            <div className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'hsl(var(--color-primary))' }} />
+            </div>
+            {`📧 אימייל — ${data.email}`}
+          </motion.button>
+
+          <div
+            role="presentation"
+            aria-disabled="true"
+            aria-label="שליחת SMS תהיה זמינה בקרוב"
+            title="שליחת SMS תהיה זמינה בקרוב"
+            className="w-full h-14 rounded-[16px] px-4 text-start text-base font-medium flex items-center gap-3 opacity-60 cursor-not-allowed"
+            style={{
+              background: 'hsl(var(--card))',
+              border: '2px solid hsl(var(--border))',
+              color: 'hsl(var(--muted-foreground))',
+            }}
+          >
+            <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/40 flex items-center justify-center shrink-0">
+              <Lock size={14} className="text-muted-foreground" aria-hidden />
+            </div>
+            <span>📱 SMS — ייפתח בקרוב</span>
+          </div>
         </div>
 
         {sendError && (
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[13px] text-destructive">{sendError}</motion.p>
         )}
 
-        <StickyButton disabled={!method || sending} onClick={handleSendCode} label={sending ? '⏳ שולח...' : 'שלח קוד אימות'} />
+        <StickyButton
+          disabled={!emailValid || sending}
+          onClick={handleSendCode}
+          label={sending ? '⏳ שולח...' : 'שלח קוד אימות'}
+        />
       </div>
     );
   }
@@ -1331,6 +1392,9 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
               ? `שלחנו קוד ל-+972-${data.phone.replace(/[-\s]/g, '').replace(/^0/, '').replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3')}`
               : 'חסר מספר טלפון מלא — חזרו לשלב יצירת החשבון עם חץ חזרה.'}
         </p>
+        {deliveryInfo && (
+          <p className="text-sm text-muted-foreground mt-2">{deliveryInfo}</p>
+        )}
       </div>
 
       <motion.div className="flex gap-2 justify-center mt-8" dir="ltr"

@@ -7,6 +7,12 @@ const HEBREW_MESSAGES: Record<OnboardingFlowErrorCode, string> = {
   otp_webhook_timeout: 'שליחת הקוד ארכה יותר מדי. בדקו חיבור לאינטרנט ונסו שוב.',
   otp_webhook_network: 'לא הצלחנו להגיע לשרת השליחה. בדקו חיבור לאינטרנט.',
   otp_code_invalid: 'קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.',
+  otp_rate_limited: 'נשלחו יותר מדי קודים. נסו/י שוב בעוד כמה דקות.',
+  otp_too_many_attempts: 'יותר מדי ניסיונות לאימות הקוד. בקשו קוד חדש או נסו מאוחר יותר.',
+  otp_email_invalid: 'כתובת המייל אינה תקינה.',
+  otp_email_delivery_failed: 'לא הצלחנו לשלוח קוד למייל. בדקו שהמייל תקין ונסו שוב.',
+  otp_sent_uncertain:
+    'הקוד נשלח. אם הוא לא הגיע, אפשר לשלוח שוב בעוד רגע.',
   registration_failed: 'השרת לא הצליח ליצור את החשבון. נסה/י שוב או בדקו את החיבור.',
   registration_invoke_transport:
     'בעיית תקשורת עם השרת. אם קיבלתם מייל אימות, נסו שוב בעוד רגע או התחברו עם הסיסמה.',
@@ -123,6 +129,43 @@ export function persistPendingOtp(_code: string): void {
 /** @deprecated */
 export function readPendingOtp(): string | null {
   return null;
+}
+
+/** Map Edge OTP issue (send) error codes to Hebrew onboarding messages. */
+export function mapIssueOtpError(edgeError?: string): OnboardingFlowErrorCode {
+  switch (edgeError) {
+    case 'invalid_email':
+      return 'otp_email_invalid';
+    case 'email_delivery_failed':
+      return 'otp_email_delivery_failed';
+    case 'rate_limited':
+      return 'otp_rate_limited';
+    case 'otp_delivery_timeout':
+      return 'otp_webhook_timeout';
+    case 'issue_failed':
+    case 'otp_issue_failed':
+      return 'otp_webhook_network';
+    case 'invalid_phone':
+      return 'otp_webhook_failed';
+    default:
+      return 'otp_webhook_network';
+  }
+}
+
+/** Map Edge OTP verify error codes to Hebrew onboarding messages. */
+export function mapEdgeOtpError(edgeError?: string): OnboardingFlowErrorCode {
+  switch (edgeError) {
+    case 'rate_limited':
+      return 'otp_rate_limited';
+    case 'too_many_attempts':
+      return 'otp_too_many_attempts';
+    case 'otp_invalid':
+    case 'otp_expired':
+    case 'challenge_not_found':
+      return 'otp_code_invalid';
+    default:
+      return 'otp_code_invalid';
+  }
 }
 
 export function clearPendingOtp(): void {

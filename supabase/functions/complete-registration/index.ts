@@ -1,5 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { normalizeIdentifier } from "../_shared/otpCrypto.ts";
+import { getRequestMeta } from "../_shared/requestMeta.ts";
+import { checkRateLimit } from "../_shared/securityRateLimit.ts";
+import { writeSecurityAudit } from "../_shared/securityAudit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,7 +36,7 @@ function buildProfilesUpsertRow(
     image_upload_status: "pending",
     role: "member",
     moderation_status: "pending",
-    suitability_status: "active",
+    suitability_status: "pending",
     is_shadow: false,
   };
 
@@ -148,7 +151,7 @@ async function promoteGuestToMemberIfNeeded(
     .update({
       role: "member",
       moderation_status: "pending",
-      suitability_status: "active",
+      suitability_status: "pending",
       is_shadow: false,
       updated_at: new Date().toISOString(),
     })
@@ -190,6 +193,25 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    const meta = await getRequestMeta(req);
+    const rateKey = `${email}:${meta.ipHash ?? "no-ip"}`;
+    const rate = await checkRateLimit(supabaseAdmin, {
+      action: "complete_registration",
+      key: rateKey,
+      maxCount: 10,
+      windowMs: 60 * 60 * 1000,
+      blockMs: 30 * 60 * 1000,
+    });
+    if (!rate.allowed) {
+      await writeSecurityAudit(supabaseAdmin, {
+        action: "complete_registration_rate_limited",
+        severity: "warn",
+        meta,
+        metadata: { email_domain: email.split("@")[1] ?? "" },
+      });
+      return json({ error: "rate_limited", diagnostics: { stage: "rate_limit" } }, 429);
+    }
 
     const { data: otpRow, error: otpErr } = await supabaseAdmin
       .from("onboarding_otp_challenges")
@@ -272,6 +294,14 @@ Deno.serve(async (req) => {
     if (!tokenHash) {
       return json({ error: "Failed to generate auth token", diagnostics: { stage: "missing_token_hash" } }, 500);
     }
+
+    await writeSecurityAudit(supabaseAdmin, {
+      action: code === "created" ? "registration_created" : "registration_existing_login",
+      severity: "info",
+      userId: userId ?? undefined,
+      meta,
+      metadata: { code },
+    });
 
     return json({
       success: true,

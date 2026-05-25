@@ -2,6 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 const UPLOAD_TIMEOUT_MS = 45_000;
 const UPLOAD_MAX_RETRIES = 2;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 const HEIC_MIME = new Set(['image/heic', 'image/heif', 'image/heif-sequence', 'image/heic-sequence']);
 
@@ -282,7 +283,9 @@ export async function verifyPublicPhotoUrl(url: string): Promise<boolean> {
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
 export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
   const validSources = sources.filter((s) => typeof s === 'string' && s.length > 0);
-  console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
+  if (import.meta.env.DEV) {
+    console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
+  }
   const out: string[] = [];
   const errors: { index: number; message: string }[] = [];
   for (let i = 0; i < validSources.length; i++) {
@@ -303,15 +306,20 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
 
 export async function uploadProfilePhoto(userId: string, file: File, index: number) {
   const prepared = await prepareImageFileForUpload(file, index);
-  console.info('[uploadProfilePhoto] start', {
-    userId,
-    index,
-    fileName: prepared.name,
-    fileType: prepared.type,
-    size: prepared.size,
-  });
+  if (import.meta.env.DEV) {
+    console.info('[uploadProfilePhoto] start', {
+      userId,
+      index,
+      fileName: prepared.name,
+      fileType: prepared.type,
+      size: prepared.size,
+    });
+  }
   if (!prepared.type.startsWith('image/')) {
     throw new Error('invalid_image_type');
+  }
+  if (prepared.size > MAX_UPLOAD_BYTES) {
+    throw new Error('image_too_large');
   }
   if (prepared.size < 400) {
     throw new Error('image_too_small');

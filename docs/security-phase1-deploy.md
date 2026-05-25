@@ -1,4 +1,4 @@
-# Security Phase 1 — deploy checklist
+# Security deploy checklist (Phase 1 + enterprise hardening)
 
 ## Database
 
@@ -6,40 +6,51 @@
 supabase db push
 ```
 
-Migrations:
+Migrations (in order):
 
-- `20260525120000_security_phase1_rls.sql` — events RLS enable, moderation visibility, profile column guard
-- `20260525120100_onboarding_otp_challenges.sql` — server OTP table
+- `20260525120000_security_phase1_rls.sql`
+- `20260525120100_onboarding_otp_challenges.sql`
+- `20260525200000_security_rate_audit_tables.sql`
+- `20260525200100_registration_otps_enterprise.sql`
+- `20260525210000_rls_enterprise_visibility.sql`
 
 Verify with [`docs/security-verify-rls.sql`](security-verify-rls.sql).
 
-## Edge Function secrets (Supabase Dashboard / CLI)
+## Edge Function secrets
 
 | Secret | Used by |
 |--------|---------|
-| `WEBHOOK_INTERNAL_SECRET` | Legacy `registration-webhook`, `send-otp-webhook` (if still called server-to-server) |
-| `N8N_OTP_WEBHOOK_URL` | `issue-onboarding-otp` (OTP delivery to n8n — code never sent to browser) |
-| `OTP_HASH_SALT` | Optional extra salt for OTP hashing |
+| `WEBHOOK_INTERNAL_SECRET` | Legacy webhooks, HMAC fallback |
+| `N8N_WEBHOOK_SECRET` | HMAC `X-Webhook-Signature` on n8n payloads |
+| `OTP_EMAIL_WEBHOOK_URL` | Email OTP delivery (preferred for email channel) |
+| `OTP_SMS_WEBHOOK_URL` | SMS OTP delivery (optional dedicated URL) |
+| `OTP_WEBHOOK_URL` | Shared OTP webhook fallback |
+| `N8N_OTP_WEBHOOK_URL` | Legacy OTP webhook fallback |
+| `OPENAI_API_KEY` | `analyze-registration-suitability`, personality |
+| `SECURITY_HASH_SALT` | Optional IP/UA hashing |
 
 ```bash
-supabase secrets set WEBHOOK_INTERNAL_SECRET=your-long-random-secret
-supabase secrets set N8N_OTP_WEBHOOK_URL=https://your-n8n-host/webhook/send-otp
+supabase secrets set WEBHOOK_INTERNAL_SECRET=... N8N_WEBHOOK_SECRET=... OTP_WEBHOOK_URL=... OPENAI_API_KEY=...
 ```
 
 ## Deploy Edge Functions
 
 ```bash
-supabase functions deploy update-profile get-profile-stats check-subscription-eligibility cancel-subscription create-referral complete-registration issue-onboarding-otp verify-onboarding-otp registration-webhook send-otp-webhook compute-compatibility
+supabase functions deploy issue-onboarding-otp verify-onboarding-otp send-registration-otp verify-registration-otp complete-registration update-profile get-profile-stats check-subscription-eligibility cancel-subscription create-referral referral-preview analyze-registration-suitability automation-dispatch compute-compatibility
 ```
 
 ## Frontend
 
-- Remove `VITE_OPENAI_API_KEY` from production env (no longer used).
+- Remove `VITE_OPENAI_API_KEY` and `VITE_N8N_*` from production env.
 - Do **not** set `VITE_SHOW_OTP_PLAINTEXT` or `VITE_ONBOARDING_DEBUG` in production.
-- Deploy SPA; Netlify uses `netlify.toml` + `public/_headers` for security headers.
+- Deploy SPA; Netlify uses `netlify.toml` + `public/_headers` (HSTS, COOP, CSP).
+
+## QA
+
+See [`docs/security-hardening-qa.md`](security-hardening-qa.md).
 
 ## Breaking changes
 
-- Onboarding OTP is **server-issued**; client no longer stores or compares codes locally.
-- `complete-registration` requires `verification_token` from `verify-onboarding-otp`.
-- IDOR Edge functions require valid user JWT; `user_id` in body must match the caller.
+- Onboarding OTP is server-issued; `verification_token` required for `complete-registration`.
+- New users start with `suitability_status=pending` until admin/AI approval.
+- IDOR Edge functions require JWT; `user_id` must match caller.

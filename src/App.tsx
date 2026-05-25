@@ -39,6 +39,7 @@ import PendingReviewPage from "./pages/PendingReviewPage";
 import BlockedPage from "./pages/BlockedPage";
 import CompleteProfilePage from "./pages/CompleteProfilePage";
 import SuitabilityGate from "@/components/guards/SuitabilityGate";
+import AdminRoute from "@/components/guards/AdminRoute";
 
 const queryClient = new QueryClient();
 
@@ -83,18 +84,20 @@ const App = () => (
                     <Route path="/profile/user/:userId" element={<ProfilePage />} />
                     <Route path="/subscription" element={<SubscriptionPage />} />
 
-                    {/* Admin — inside MainLayout for tab bar */}
-                    <Route path="/admin" element={<AdminDashboardPage />} />
-                    <Route path="/admin/users" element={<AdminUsersPage />} />
-                    <Route path="/admin/events" element={<AdminEventsPage />} />
-                    <Route path="/admin/events/new" element={<AdminEventFormPage />} />
-                    <Route path="/admin/events/:eventId" element={<AdminEventDetailPage />} />
-                    <Route path="/admin/events/:eventId/participants" element={<AdminEventParticipantsPage />} />
-                    <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
-                    <Route path="/admin/chats" element={<AdminChatsPage />} />
-                    <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
-                    <Route path="/admin/automation" element={<AdminAutomationPage />} />
-                    <Route path="/admin/community" element={<AdminCommunityPage />} />
+                    {/* Admin — super users only */}
+                    <Route element={<AdminRoute />}>
+                      <Route path="/admin" element={<AdminDashboardPage />} />
+                      <Route path="/admin/users" element={<AdminUsersPage />} />
+                      <Route path="/admin/events" element={<AdminEventsPage />} />
+                      <Route path="/admin/events/new" element={<AdminEventFormPage />} />
+                      <Route path="/admin/events/:eventId" element={<AdminEventDetailPage />} />
+                      <Route path="/admin/events/:eventId/participants" element={<AdminEventParticipantsPage />} />
+                      <Route path="/admin/events/:eventId/edit" element={<AdminEventFormPage />} />
+                      <Route path="/admin/chats" element={<AdminChatsPage />} />
+                      <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
+                      <Route path="/admin/automation" element={<AdminAutomationPage />} />
+                      <Route path="/admin/community" element={<AdminCommunityPage />} />
+                    </Route>
                   </Route>
                 </Route>
 

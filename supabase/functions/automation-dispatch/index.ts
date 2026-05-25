@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { applyTransactionalEmailWrapper } from "../_shared/emailTransactionalHtml.ts";
+import { postSignedWebhook } from "../_shared/webhookDispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -334,15 +335,14 @@ Deno.serve(async (req) => {
     let errorText = "";
 
     try {
-      const wr = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(outbound),
-      });
+      const wr = await postSignedWebhook(
+        webhookUrl,
+        outbound as unknown as Record<string, unknown>,
+      );
       webhookStatus = wr.status;
       webhookOk = wr.ok;
       if (!wr.ok) {
-        errorText = await wr.text().catch(() => wr.statusText);
+        errorText = `webhook_http_${wr.status}`;
       }
     } catch (e) {
       errorText = e instanceof Error ? e.message : String(e);

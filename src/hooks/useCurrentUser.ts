@@ -77,8 +77,10 @@ export function useCurrentUser(): CurrentUser {
         .eq('user_id', userId)
         .maybeSingle()
         .then(async ({ data, error }) => {
-          if (error) console.error('useCurrentUser fetchProfile:', error.message);
-          if (!error) console.info('[useCurrentUser] profile fetch success', { userId, found: !!data });
+          if (error && import.meta.env.DEV) console.error('useCurrentUser fetchProfile:', error.message);
+          if (!error && import.meta.env.DEV) {
+            console.info('[useCurrentUser] profile fetch success', { userId, found: !!data });
+          }
           let profileData = (data as SupabaseProfile | null) ?? null;
           if (!profileData) {
             const firstName =
@@ -96,7 +98,7 @@ export function useCurrentUser(): CurrentUser {
                   last_name: lastName || null,
                   role: 'member',
                   moderation_status: 'pending',
-                  suitability_status: 'active',
+                  suitability_status: 'pending',
                   is_shadow: false,
                   profile_completed: false,
                   image_upload_status: 'pending',

@@ -54,13 +54,14 @@ const defaultData: OnboardingData = {
 };
 
 const STORAGE_KEY = 'clicks_onboarding';
-const PWD_SESSION_KEY = 'clicks_pwd';
 const REF_STORE_KEY = 'clicks_ref_code';
 
 interface OnboardingContextType {
   data: OnboardingData;
   updateData: (partial: Partial<OnboardingData>) => void;
   clearData: () => void;
+  /** Password kept in memory only until OTP completes — never sessionStorage. */
+  getPassword: () => string;
   voiceIntroDraftRef: MutableRefObject<VoiceIntroDraft>;
   /** In-memory only — data URLs are too large for localStorage. */
   photosDraftRef: MutableRefObject<string[]>;
@@ -71,6 +72,7 @@ const OnboardingContext = createContext<OnboardingContextType | null>(null);
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const voiceIntroDraftRef = useRef<VoiceIntroDraft>(null);
   const photosDraftRef = useRef<string[]>([]);
+  const passwordRef = useRef('');
 
   const [data, setData] = useState<OnboardingData>(() => {
     let refFromStore = '';
@@ -81,16 +83,17 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     }
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      const savedPwd = sessionStorage.getItem(PWD_SESSION_KEY) || '';
       if (saved) {
         const parsed = JSON.parse(saved);
-        const { photos: _storedPhotos, ...parsedWithoutPhotos } = parsed as OnboardingData & { photos?: unknown };
+        const { photos: _storedPhotos, password: _pwd, ...parsedWithoutPhotos } = parsed as OnboardingData & {
+          photos?: unknown;
+        };
         return {
           ...defaultData,
           ...parsedWithoutPhotos,
           photos: [],
           referralCode: (parsed.referralCode as string) || refFromStore,
-          password: savedPwd,
+          password: '',
           questionnaireResponses: {
             ...defaultData.questionnaireResponses,
             ...(typeof parsed.questionnaireResponses === 'object' && parsed.questionnaireResponses
@@ -99,11 +102,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           },
         };
       }
-      return {
-        ...defaultData,
-        referralCode: refFromStore,
-        password: savedPwd,
-      };
+      return { ...defaultData, referralCode: refFromStore };
     } catch {
       /* ignore */
     }
@@ -112,7 +111,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      // Don't persist password or photos (data URLs exceed localStorage quota)
       const { password, photos, ...safe } = data;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
     } catch {
@@ -122,33 +120,34 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   const updateData = (partial: Partial<OnboardingData>) => {
     if (partial.password !== undefined) {
-      try {
-        sessionStorage.setItem(PWD_SESSION_KEY, partial.password);
-      } catch {
-        /* ignore sessionStorage */
-      }
+      passwordRef.current = partial.password;
     }
     if (partial.photos !== undefined) {
       photosDraftRef.current = partial.photos.filter((u) => typeof u === 'string' && u.length > 0);
     }
-    setData(prev => ({ ...prev, ...partial }));
+    setData((prev) => ({ ...prev, ...partial, password: partial.password ?? prev.password }));
   };
 
   const clearData = () => {
     voiceIntroDraftRef.current = null;
     photosDraftRef.current = [];
+    passwordRef.current = '';
     setData(defaultData);
     localStorage.removeItem(STORAGE_KEY);
     try {
-      sessionStorage.removeItem(PWD_SESSION_KEY);
       sessionStorage.removeItem('clicks_onboarding_phone_backup');
+      sessionStorage.removeItem('clicks_pwd');
     } catch {
       /* ignore sessionStorage */
     }
   };
 
+  const getPassword = () => passwordRef.current || data.password;
+
   return (
-    <OnboardingContext.Provider value={{ data, updateData, clearData, voiceIntroDraftRef, photosDraftRef }}>
+    <OnboardingContext.Provider
+      value={{ data, updateData, clearData, getPassword, voiceIntroDraftRef, photosDraftRef }}
+    >
       {children}
     </OnboardingContext.Provider>
   );

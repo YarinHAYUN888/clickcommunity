@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { getRequestMeta } from "../_shared/requestMeta.ts";
+import { checkRateLimit } from "../_shared/securityRateLimit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,7 +23,24 @@ Deno.serve(async (req) => {
       });
     }
 
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const meta = await getRequestMeta(req);
+    const rate = await checkRateLimit(admin, {
+      action: "referral_preview",
+      key: meta.ipHash ?? "unknown",
+      maxCount: 40,
+      windowMs: 60 * 1000,
+      blockMs: 5 * 60 * 1000,
+    });
+    if (!rate.allowed) {
+      return new Response(JSON.stringify({ first_name: null }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const { data: profile } = await admin
       .from("profiles")
@@ -39,6 +58,9 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (_err) {
-    return new Response(JSON.stringify({ error: "server_error" }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: "server_error" }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 });
