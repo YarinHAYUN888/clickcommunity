@@ -1,4 +1,4 @@
-import { optionsOk } from "../_shared/edgeAuth.ts";
+import { optionsOk, jsonResponse } from "../_shared/edgeAuth.ts";
 import { handleIssueOtp } from "../_shared/onboardingOtpCore.ts";
 
 Deno.serve(async (req) => {
@@ -6,10 +6,14 @@ Deno.serve(async (req) => {
   try {
     return await handleIssueOtp(req);
   } catch (err) {
-    console.error("[issue-onboarding-otp]", err);
-    return new Response(JSON.stringify({ error: "unexpected_error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("[issue-onboarding-otp] failed", {
+      stage: "unexpected",
+      errorMessage,
     });
+    return jsonResponse(
+      { ok: false, error_code: "unexpected_error", error: "unexpected_error", stage: "unexpected" },
+      500,
+    );
   }
 });

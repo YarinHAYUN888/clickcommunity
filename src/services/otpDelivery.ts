@@ -20,7 +20,7 @@ export type SyncOtpWebhookResult = {
   error?: string;
 };
 
-export type OtpDeliveryStatus = 'sent' | 'uncertain' | 'skipped_no_webhook' | string;
+export type OtpDeliveryStatus = 'sent' | 'pending' | 'uncertain' | 'skipped_no_webhook' | string;
 
 export interface OnboardingOtpPayloadSource {
   firstName?: string;
@@ -175,8 +175,8 @@ async function parseIssueOtpEdgeBody(
   return { body: null, httpStatus: null };
 }
 
-function isTransportFailure(error: unknown, httpStatus: number | null): boolean {
-  if (httpStatus !== null && httpStatus >= 500) return true;
+function isNetworkFailure(error: unknown, httpStatus: number | null): boolean {
+  if (httpStatus === 0) return true;
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     if (error.name === 'AbortError' || msg.includes('fetch') || msg.includes('network')) {
@@ -184,6 +184,19 @@ function isTransportFailure(error: unknown, httpStatus: number | null): boolean 
     }
   }
   return false;
+}
+
+/** Maps Edge issue-otp response to a stable error_code for UI (exported for tests). */
+export function resolveIssueOtpErrorCode(
+  body: IssueOtpEdgeBody | null,
+  error: unknown,
+  httpStatus: number | null,
+): string {
+  if (body?.error_code) return body.error_code;
+  if (body?.error && typeof body.error === 'string') return body.error;
+  if (isNetworkFailure(error, httpStatus)) return 'network_error';
+  if (httpStatus !== null && httpStatus >= 500) return 'unexpected_error';
+  return 'issue_failed';
 }
 
 export async function issueOnboardingOtp(
@@ -236,7 +249,9 @@ export async function issueOnboardingOtp(
   if (body?.ok === true && body.challenge_id) {
     const deliveryStatus = body.delivery_status;
     const deliveryUncertain =
-      deliveryStatus === 'uncertain' || deliveryStatus === 'skipped_no_webhook';
+      deliveryStatus === 'pending' ||
+      deliveryStatus === 'uncertain' ||
+      deliveryStatus === 'skipped_no_webhook';
 
     if (verificationMethod === 'email') {
       logEmailOtpStep(5, { deliveryStatus, deliveryUncertain });
@@ -252,8 +267,7 @@ export async function issueOnboardingOtp(
     };
   }
 
-  const errorCode =
-    body?.error_code ?? body?.error ?? (isTransportFailure(error, httpStatus) ? 'otp_delivery_timeout' : 'issue_failed');
+  const errorCode = resolveIssueOtpErrorCode(body, error, httpStatus);
 
   if (import.meta.env.DEV) {
     console.error('[issue-onboarding-otp]', { errorCode, httpStatus, error });

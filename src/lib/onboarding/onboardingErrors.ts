@@ -6,14 +6,19 @@ const HEBREW_MESSAGES: Record<OnboardingFlowErrorCode, string> = {
   otp_webhook_failed: 'שליחת קוד האימות נכשלה. נסה/י שוב בעוד רגע.',
   otp_webhook_timeout: 'שליחת הקוד ארכה יותר מדי. בדקו חיבור לאינטרנט ונסו שוב.',
   otp_webhook_network: 'לא הצלחנו להגיע לשרת השליחה. בדקו חיבור לאינטרנט.',
+  otp_network_error: 'לא הצלחנו להתחבר לשרת. בדקו חיבור לאינטרנט.',
   otp_code_invalid: 'קוד האימות שגוי או פג תוקף. אפשר לבקש קוד חדש.',
   otp_rate_limited: 'נשלחו יותר מדי קודים. נסו/י שוב בעוד כמה דקות.',
   otp_too_many_attempts: 'יותר מדי ניסיונות לאימות הקוד. בקשו קוד חדש או נסו מאוחר יותר.',
-  otp_email_required: 'נא להזין כתובת מייל לפני שליחת קוד האימות.',
-  otp_email_invalid: 'כתובת המייל אינה תקינה.',
-  otp_email_delivery_failed: 'לא הצלחנו לשלוח קוד למייל. בדקו שהמייל תקין ונסו שוב.',
+  otp_email_required: 'כתובת המייל חסרה או אינה תקינה.',
+  otp_email_invalid: 'כתובת המייל חסרה או אינה תקינה.',
+  otp_email_delivery_failed: 'לא הצלחנו לשלוח קוד למייל. נסה/י שוב בעוד רגע.',
+  otp_db_unavailable: 'שירות האימות לא זמין כרגע. נסה/י שוב בעוד רגע.',
+  otp_server_config: 'שירות האימות לא מוגדר כראוי. פנה לתמיכה.',
   otp_sent_uncertain:
     'הקוד נשלח. אם הוא לא הגיע, אפשר לשלוח שוב בעוד רגע.',
+  otp_delivery_pending:
+    'שליחת הקוד מתבצעת. אם הוא לא הגיע תוך דקה, אפשר לשלוח שוב.',
   registration_failed: 'השרת לא הצליח ליצור את החשבון. נסה/י שוב או בדקו את החיבור.',
   registration_invoke_transport:
     'בעיית תקשורת עם השרת. אם קיבלתם מייל אימות, נסו שוב בעוד רגע או התחברו עם הסיסמה.',
@@ -45,7 +50,7 @@ export function shouldShowRegistrationFailed(
 export function classifyOtpWebhookFailure(result: SyncOtpWebhookResult): OnboardingFlowErrorCode {
   if (result.ok) return 'otp_webhook_failed';
   if (result.error === 'timeout') return 'otp_webhook_timeout';
-  if (result.status === 0) return 'otp_webhook_network';
+  if (result.status === 0) return 'otp_network_error';
   return 'otp_webhook_failed';
 }
 
@@ -136,22 +141,28 @@ export function readPendingOtp(): string | null {
 export function mapIssueOtpError(edgeError?: string): OnboardingFlowErrorCode {
   switch (edgeError) {
     case 'email_required':
-      return 'otp_email_required';
     case 'invalid_email':
-      return 'otp_email_invalid';
+      return 'otp_email_required';
     case 'email_delivery_failed':
       return 'otp_email_delivery_failed';
+    case 'db_insert_failed':
+    case 'otp_issue_failed':
+      return 'otp_db_unavailable';
+    case 'server_config_error':
+    case 'unexpected_error':
+      return 'otp_server_config';
+    case 'network_error':
+      return 'otp_network_error';
     case 'rate_limited':
       return 'otp_rate_limited';
     case 'otp_delivery_timeout':
       return 'otp_webhook_timeout';
     case 'issue_failed':
-    case 'otp_issue_failed':
-      return 'otp_webhook_network';
+      return 'otp_db_unavailable';
     case 'invalid_phone':
       return 'otp_webhook_failed';
     default:
-      return 'otp_webhook_network';
+      return 'unknown';
   }
 }
 

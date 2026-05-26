@@ -52,6 +52,26 @@ supabase functions deploy issue-onboarding-otp verify-onboarding-otp send-regist
 - Do not change `OTP_EMAIL_WEBHOOK_URL` / TEST↔PROD mapping or n8n Gmail nodes
 - Post-deploy: trigger email OTP and confirm n8n execution shows `json.body.email` populated
 
+### OTP 500 / delivery diagnostics
+
+Edge logs use prefix `[issue-onboarding-otp]` with `stage` values: `missing_webhook_url`, `missing_secret`, `db_insert_failed`, `email_dispatch_failed`, `unexpected`.
+
+| Secret / env | Purpose |
+|--------------|---------|
+| `OTP_EMAIL_WEBHOOK_URL` | Required for email OTP (or fallbacks `OTP_WEBHOOK_URL`, `N8N_OTP_WEBHOOK_URL`) |
+| `N8N_WEBHOOK_SECRET` | HMAC signature (optional unless `OTP_REQUIRE_WEBHOOK_SECRET=true`) |
+| `OTP_REQUIRE_WEBHOOK_SECRET` | Set `true` in production to fail fast when no signing secret |
+
+**Manual QA after deploy:**
+
+1. Send email OTP — no HTTP 500 in browser console
+2. Email arrives; n8n shows `json.body.email` populated
+3. No CSP errors on `data:image` (onboarding photo compression) or hero Supabase Storage video
+4. SMS row remains locked ("ייפתח בקרוב")
+5. Webhook timeout returns HTTP 200 + `delivery_status: "pending"` (user can still enter code)
+
+**Netlify:** CSP changes in `netlify.toml` / `public/_headers` require a Netlify deploy (not only `npm run build` locally).
+
 ## Frontend
 
 - Remove `VITE_OPENAI_API_KEY` and `VITE_N8N_*` from production env.

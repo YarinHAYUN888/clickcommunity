@@ -27,6 +27,19 @@ function firstNonEmpty(...values: (string | undefined)[]): string | null {
   return null;
 }
 
+export function getWebhookSigningSecret(): string | null {
+  return (
+    Deno.env.get("N8N_WEBHOOK_SECRET")?.trim() ||
+    Deno.env.get("WEBHOOK_INTERNAL_SECRET")?.trim() ||
+    null
+  );
+}
+
+/** When true, issue-otp fails fast if no HMAC secret is configured. */
+export function shouldRequireWebhookSecret(): boolean {
+  return Deno.env.get("OTP_REQUIRE_WEBHOOK_SECRET") === "true";
+}
+
 export function resolveOtpWebhookUrl(channel: OtpDeliveryChannel): string | null {
   if (channel === "email") {
     return firstNonEmpty(
@@ -57,9 +70,7 @@ export async function postSignedWebhook(
     "Content-Type": "application/json",
   };
 
-  const secret =
-    Deno.env.get("N8N_WEBHOOK_SECRET")?.trim() ||
-    Deno.env.get("WEBHOOK_INTERNAL_SECRET")?.trim();
+  const secret = getWebhookSigningSecret();
   if (secret) {
     headers["X-Webhook-Signature"] = await hmacSign(body, secret);
   }

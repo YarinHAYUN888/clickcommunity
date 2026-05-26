@@ -12,9 +12,11 @@ import { checkRateLimit } from "./securityRateLimit.ts";
 import { writeSecurityAudit } from "./securityAudit.ts";
 import { buildN8nWebhookEnvelope, toApiChannel } from "./n8nOtpEnvelope.ts";
 import {
+  getWebhookSigningSecret,
   postSignedWebhookWithRetry,
   redactWebhookPayloadForLog,
   resolveOtpWebhookUrl,
+  shouldRequireWebhookSecret,
   type OtpDeliveryChannel,
 } from "./webhookDispatch.ts";
 
@@ -26,11 +28,32 @@ const EMAIL_RATE_WINDOW_MS = 10 * 60 * 1000;
 const EMAIL_MAX_PER_ADDRESS = 3;
 const EMAIL_MAX_PER_IP = 5;
 
+type DispatchOutcome = {
+  outcome: "sent" | "pending" | "failed";
+  httpStatus?: number;
+};
+
 function serviceClient(): SupabaseClient {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+}
+
+function logIssue(stage: string, detail?: Record<string, unknown>): void {
+  if (detail) {
+    console.log(`[issue-onboarding-otp] ${stage}`, detail);
+  } else {
+    console.log(`[issue-onboarding-otp] ${stage}`);
+  }
+}
+
+function logIssueFail(
+  stage: string,
+  errorMessage: string,
+  detail?: Record<string, unknown>,
+): void {
+  console.error("[issue-onboarding-otp] failed", { stage, errorMessage, ...detail });
 }
 
 function failResponse(
@@ -95,6 +118,21 @@ function normalizeChannel(
   return { internal: null, api: null };
 }
 
+function validateWebhookConfig(
+  channel: OtpDeliveryChannel,
+): { ok: true } | { ok: false; stage: string; errorCode: string } {
+  const url = resolveOtpWebhookUrl(channel);
+  if (!url) {
+    return { ok: false, stage: "missing_webhook_url", errorCode: "server_config_error" };
+  }
+
+  if (shouldRequireWebhookSecret() && !getWebhookSigningSecret()) {
+    return { ok: false, stage: "missing_secret", errorCode: "server_config_error" };
+  }
+
+  return { ok: true };
+}
+
 async function dispatchOtp(
   channel: OtpDeliveryChannel,
   code: string,
@@ -102,12 +140,8 @@ async function dispatchOtp(
   body: Record<string, unknown>,
   destination: string,
   registrationSessionId: string | null,
-): Promise<"sent" | "uncertain" | "skipped_no_webhook"> {
-  const n8nUrl = resolveOtpWebhookUrl(channel);
-  if (!n8nUrl) {
-    console.warn(`[issue-otp] no webhook URL for channel=${channel}`);
-    return "skipped_no_webhook";
-  }
+): Promise<DispatchOutcome> {
+  const n8nUrl = resolveOtpWebhookUrl(channel)!;
 
   const webhookPayload = buildN8nWebhookEnvelope(
     channel,
@@ -117,24 +151,42 @@ async function dispatchOtp(
     body,
     registrationSessionId,
   );
+
+  if (channel === "email") {
+    logIssue("dispatching_email");
+  }
+
   try {
     const res = await postSignedWebhookWithRetry(n8nUrl, webhookPayload, {
       timeoutMs: 12_000,
       retries: 1,
     });
-    if (res.ok) return "sent";
+
+    if (channel === "email") {
+      logIssue("email_dispatch_result", { ok: res.ok, status: res.status });
+    }
+
+    if (res.ok) return { outcome: "sent" };
+
+    if (res.uncertain) {
+      return { outcome: "pending", httpStatus: res.status };
+    }
+
     console.error(
-      `[issue-otp] webhook channel=${channel} status=${res.status}`,
+      `[issue-onboarding-otp] webhook channel=${channel} status=${res.status}`,
       redactWebhookPayloadForLog(webhookPayload),
     );
-    return res.uncertain ? "uncertain" : "uncertain";
+    return { outcome: "failed", httpStatus: res.status };
   } catch (e) {
-    console.error(`[issue-otp] webhook channel=${channel} failed`, e);
-    return "uncertain";
+    const msg = e instanceof Error ? e.message : String(e);
+    logIssueFail("email_dispatch_failed", msg, { channel });
+    return { outcome: "pending", httpStatus: 0 };
   }
 }
 
 export async function handleIssueOtp(req: Request): Promise<Response> {
+  logIssue("request_received");
+
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   let { internal: channel, api: apiChannel } = normalizeChannel(
     body.channel ?? body.verificationMethod,
@@ -154,17 +206,35 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     apiChannel = "sms";
   }
 
+  logIssue("parsed_body", {
+    channel: apiChannel ?? channel,
+    hasEmail: email.length > 0,
+    hasPhone: phone.length > 0,
+    hasSessionId: typeof body.registration_session_id === "string" &&
+      body.registration_session_id.trim().length > 0,
+  });
+
   if (!channel) {
+    logIssueFail("validation", "email_required");
     return failResponse("email_required", 400);
   }
 
   if (channel === "email") {
-    if (!email) return failResponse("email_required", 400);
-    if (!isValidEmail(email)) return failResponse("invalid_email", 400);
+    if (!email) {
+      logIssueFail("validation", "email_required");
+      return failResponse("email_required", 400);
+    }
+    if (!isValidEmail(email)) {
+      logIssueFail("validation", "invalid_email");
+      return failResponse("invalid_email", 400);
+    }
   }
 
   if (channel === "phone") {
-    if (!phone) return failResponse("phone_required", 400);
+    if (!phone) {
+      logIssueFail("validation", "phone_required");
+      return failResponse("phone_required", 400);
+    }
   }
 
   const identifier = normalizeIdentifier(
@@ -173,7 +243,14 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     channel,
   );
   if (!identifier) {
+    logIssueFail("validation", channel === "email" ? "invalid_email" : "invalid_phone");
     return failResponse(channel === "email" ? "invalid_email" : "invalid_phone", 400);
+  }
+
+  const webhookConfig = validateWebhookConfig(channel);
+  if (!webhookConfig.ok) {
+    logIssueFail(webhookConfig.stage, webhookConfig.errorCode);
+    return failResponse(webhookConfig.errorCode, 500, { stage: webhookConfig.stage });
   }
 
   const supabase = serviceClient();
@@ -194,6 +271,8 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     return failResponse("rate_limited", 429, { retry_after_sec: rate.retryAfterSec });
   }
 
+  logIssue("creating_challenge");
+
   const code = generateNumericOtp();
   const codeHash = await hashOtpCode(code, identifier);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString();
@@ -213,14 +292,18 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     .single();
 
   if (insertErr || !row?.id) {
-    console.error("[issue-otp] insert failed", insertErr?.message);
-    return failResponse("otp_issue_failed", 500);
+    logIssueFail("db_insert_failed", insertErr?.message ?? "insert returned no id", {
+      dbCode: insertErr?.code,
+    });
+    return failResponse("db_insert_failed", 500, { stage: "db_insert_failed" });
   }
+
+  logIssue("challenge_created", { challengeId: row.id });
 
   const destinationForWebhook = channel === "email"
     ? (email ?? "")
     : (phone ?? "");
-  const deliveryStatus = await dispatchOtp(
+  const dispatch = await dispatchOtp(
     channel,
     code,
     row.id,
@@ -229,14 +312,33 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
     sessionId,
   );
 
+  const deliveryStatus = dispatch.outcome === "sent"
+    ? "sent"
+    : dispatch.outcome === "pending"
+    ? "pending"
+    : "failed";
+
   await writeSecurityAudit(supabase, {
     action: "otp_issued",
-    severity: "info",
+    severity: dispatch.outcome === "failed" ? "warn" : "info",
     meta,
     targetType: "challenge",
     targetId: row.id,
-    metadata: { channel, delivery_status: deliveryStatus, session_id: sessionId },
+    metadata: {
+      channel,
+      delivery_status: deliveryStatus,
+      session_id: sessionId,
+      webhook_status: dispatch.httpStatus,
+    },
   });
+
+  if (dispatch.outcome === "failed") {
+    logIssueFail("email_dispatch_failed", `webhook status ${dispatch.httpStatus ?? "unknown"}`);
+    return failResponse("email_delivery_failed", 502, {
+      stage: "email_dispatch_failed",
+      challenge_id: row.id,
+    });
+  }
 
   return jsonResponse({
     ok: true,

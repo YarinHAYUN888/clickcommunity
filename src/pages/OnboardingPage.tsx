@@ -1013,7 +1013,11 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       persistPendingOtpChallenge(result.challengeId);
       setSendError('');
       setDeliveryInfo(
-        result.deliveryUncertain ? getHebrewOnboardingMessage('otp_sent_uncertain') : '',
+        result.deliveryStatus === 'pending'
+          ? getHebrewOnboardingMessage('otp_delivery_pending')
+          : result.deliveryUncertain
+            ? getHebrewOnboardingMessage('otp_sent_uncertain')
+            : '',
       );
       setCodeSent(true);
       setResendTimer(60);
@@ -1054,7 +1058,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       applyOtpIssueSuccess(result);
     } catch (e) {
       console.error('Send code exception:', e);
-      setSendError(getHebrewOnboardingMessage('otp_webhook_network'));
+      setSendError(getHebrewOnboardingMessage('otp_network_error'));
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
@@ -1303,7 +1307,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       }
     } catch (e) {
       console.error('Resend exception:', e);
-      setVerifyError(getHebrewOnboardingMessage('otp_webhook_network'));
+      setVerifyError(getHebrewOnboardingMessage('otp_network_error'));
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
