@@ -1,6 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { SupabaseProfile } from '@/hooks/useCurrentUser';
-import { hasRequiredOnboardingFields } from '@/lib/profileCompletion';
 
 export type PostAuthRoute = '/pending-review' | '/clicks' | '/blocked' | '/complete-profile';
 
@@ -27,15 +26,6 @@ function isModerationApproved(p: ProfileRowForRedirect | SupabaseProfile | null)
   return p?.moderation_status === 'approved';
 }
 
-function hasPersistedPhotos(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
-  if (!p) return false;
-  const photos = p.photos;
-  if (Array.isArray(photos) && photos.length > 0 && photos.some((u) => typeof u === 'string' && u.length > 0)) {
-    return true;
-  }
-  return typeof p.avatar_url === 'string' && p.avatar_url.length > 0;
-}
-
 /**
  * Human review queue: only `moderation_status = pending` (not suitability alone — avoids shadow/isolated users re-entering the queue UI).
  */
@@ -56,27 +46,16 @@ function isBlockedOrRejected(p: ProfileRowForRedirect | SupabaseProfile | null):
   return moderation === 'rejected' || suitability === 'blocked';
 }
 
-function needsCompleteProfile(p: ProfileRowForRedirect | SupabaseProfile | null): boolean {
-  if (!p) return true;
-  if (hasRequiredOnboardingFields(p)) return false;
-  if (p.profile_completed === true) return false;
-  if (isModerationApproved(p) && hasPersistedPhotos(p)) return false;
-  return true;
-}
-
 /**
  * Sync routing from an already-loaded profile (e.g. SuitabilityGate).
  * Returns where the user should be; `/clicks` means the main gated shell is OK.
  */
 export function getPostAuthRouteFromProfile(profile: SupabaseProfile | ProfileRowForRedirect | null): PostAuthRoute {
-  if (!profile) return '/complete-profile';
+  if (!profile) return '/clicks';
   if (isSuspended(profile) || isBlockedOrRejected(profile)) return '/blocked';
   if (isPendingReview(profile)) return '/pending-review';
-  // Staff approved this user — always allow the main app (no "complete profile" trap after approval).
-  if (isModerationApproved(profile)) {
-    return '/clicks';
-  }
-  if (needsCompleteProfile(profile)) return '/complete-profile';
+  // Frontend no longer blocks users with /complete-profile.
+  // Profile completion remains an in-profile action only.
   return '/clicks';
 }
 
@@ -96,7 +75,7 @@ export async function resolvePostAuthRedirect(
 
   if (error) {
     console.error('resolvePostAuthRedirect:', error.message);
-    return { route: '/complete-profile', profile: null };
+    return { route: '/clicks', profile: null };
   }
 
   const row = (profile as ProfileRowForRedirect | null) ?? null;

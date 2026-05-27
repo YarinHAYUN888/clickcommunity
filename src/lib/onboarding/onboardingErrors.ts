@@ -26,7 +26,7 @@ const HEBREW_MESSAGES: Record<OnboardingFlowErrorCode, string> = {
   session_restore_failed: 'החשבון נוצר אך ההתחברות נכשלה. נסה/י להתחבר עם האימייל והסיסמה.',
   profile_save_failed: 'לא הצלחנו לשמור את פרטי הפרופיל. נסה/י שוב.',
   photo_upload_partial:
-    'החשבון נוצר. חלק מהתמונות לא נשמרו — אפשר להוסיף תמונות מעמוד הפרופיל.',
+    'חלק מהתמונות לא נשמרו. בדקו חיבור אינטרנט, גודל עד 5MB ופורמט נתמך (JPG/PNG/WEBP), ואז נסו שוב מעמוד הפרופיל.',
   onboarding_finalize_partial:
     'החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.',
   auth_completion_sync_pending:

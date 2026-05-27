@@ -11,6 +11,7 @@ import {
 interface AdminContextType {
   superRole: string | null;
   isSuperUser: boolean;
+  isSuperAdmin: boolean;
   loading: boolean;
   userEmail: string | null;
   /** Webhooks, n8n, raw logs, retries — never for pure community-manager UX */
@@ -23,6 +24,7 @@ interface AdminContextType {
 const AdminContext = createContext<AdminContextType>({
   superRole: null,
   isSuperUser: false,
+  isSuperAdmin: false,
   loading: true,
   userEmail: null,
   automationTechnicalAccess: false,
@@ -37,6 +39,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [lsTechnicalView, setLsTechnicalView] = useState(() => readTechnicalViewFromStorage());
 
   const isSuperUser = !!superRole;
+  const isSuperAdmin = superRole === 'super_admin';
 
   const emailInDevAllowlist = useMemo(() => {
     const e = (userEmail ?? '').trim().toLowerCase();
@@ -104,6 +107,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     () => ({
       superRole,
       isSuperUser,
+      isSuperAdmin,
       loading,
       userEmail,
       automationTechnicalAccess,
@@ -113,6 +117,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [
       superRole,
       isSuperUser,
+      isSuperAdmin,
       loading,
       userEmail,
       automationTechnicalAccess,

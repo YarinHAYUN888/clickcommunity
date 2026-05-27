@@ -3,8 +3,7 @@ import { isValidLifeNiche } from '@/data/lifeNiche';
 import { NEW_SIGNUP_PROFILE_DEFAULTS } from '@/lib/profileCompletion';
 
 describe('community member defaults', () => {
-  it('NEW_SIGNUP_PROFILE_DEFAULTS sets role member', () => {
-    expect(NEW_SIGNUP_PROFILE_DEFAULTS.role).toBe('member');
+  it('NEW_SIGNUP_PROFILE_DEFAULTS keeps moderation defaults', () => {
     expect(NEW_SIGNUP_PROFILE_DEFAULTS.moderation_status).toBe('approved');
     expect(NEW_SIGNUP_PROFILE_DEFAULTS.suitability_status).toBe('active');
   });

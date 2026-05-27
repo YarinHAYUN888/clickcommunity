@@ -159,6 +159,7 @@ export async function runPostOtpRegistration(
 
   const email = registrationBody.email;
   const password = registrationBody.password;
+  console.log('onboarding start', { email, photoSourceCount: photoSources.length });
   logAuthCompletionStep(1, { phase: 'start', email });
 
   const invokeResult = await invokeCompleteRegistration(registrationBody);
@@ -200,6 +201,11 @@ export async function runPostOtpRegistration(
     imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
   }
 
+  // Fail-safe: do not continue onboarding flow when critical profile DB save failed.
+  if (profileSyncFailed) {
+    throw new Error('profile_save_failed');
+  }
+
   if (voiceBlob) {
     try {
       await uploadVoiceIntroAfterProfile(userId, voiceBlob);
@@ -232,6 +238,7 @@ export async function runPostOtpRegistration(
   logOnboardingStep(7, { userId });
 
   const { route } = await resolvePostAuthRedirect(userId);
+  console.log('redirect stage', { userId, route });
   await waitForSession(500);
   logAuthCompletionStep(6, { route });
   logOnboardingStep(8, { route });

@@ -2,6 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
 import { isValidLifeNiche } from '@/data/lifeNiche';
 import {
+  DEFAULT_NEW_USER_ROLE_FALLBACK,
   hasRequiredOnboardingFields,
   NEW_SIGNUP_PROFILE_DEFAULTS,
 } from '@/lib/profileCompletion';
@@ -61,6 +62,7 @@ function draftToProfileRow(
   userId: string,
   photoList: string[],
   imageUploadStatus: 'pending' | 'success' | 'failed',
+  profileCompletedOverride?: boolean,
 ): ProfilesInsert {
   const dob = data.dateOfBirth
     ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
@@ -70,16 +72,19 @@ function draftToProfileRow(
     user_id: userId,
     updated_at: new Date().toISOString(),
     ...NEW_SIGNUP_PROFILE_DEFAULTS,
-    profile_completed: hasRequiredOnboardingFields({
-      first_name: data.firstName,
-      date_of_birth: dob,
-      gender: data.gender,
-      life_niche: data.life_niche,
-      interests: data.interests,
-      questionnaire_responses: data.questionnaireResponses,
-      moderation_status: 'approved',
-      profile_completed: false,
-    }),
+    profile_completed:
+      typeof profileCompletedOverride === 'boolean'
+        ? profileCompletedOverride
+        : hasRequiredOnboardingFields({
+            first_name: data.firstName,
+            date_of_birth: dob,
+            gender: data.gender,
+            life_niche: data.life_niche,
+            interests: data.interests,
+            questionnaire_responses: data.questionnaireResponses,
+            moderation_status: 'approved',
+            profile_completed: false,
+          }),
     image_upload_status: imageUploadStatus,
   };
 
@@ -111,7 +116,10 @@ function draftToProfileRow(
   return row;
 }
 
-/** Idempotent: ensure new signups are community members (role=member), not guest. */
+/**
+ * Idempotent profile defaults patch.
+ * Important: does NOT override existing role (guest/member).
+ */
 export async function ensureCommunityMemberDefaults(userId: string): Promise<void> {
   const { data: row, error: fetchErr } = await supabase
     .from('profiles')
@@ -124,16 +132,15 @@ export async function ensureCommunityMemberDefaults(userId: string): Promise<voi
     return;
   }
 
-  const role = row?.role ?? 'guest';
-  if (role === 'member') return;
+  const role = row?.role ?? null;
+  const currentModeration = row?.moderation_status ?? null;
+  if (role && currentModeration) return;
 
-  const patch: Record<string, unknown> = {
-    ...NEW_SIGNUP_PROFILE_DEFAULTS,
-    updated_at: new Date().toISOString(),
-  };
-  if (row?.moderation_status === 'rejected') {
-    delete patch.moderation_status;
-  }
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (!role) patch.role = DEFAULT_NEW_USER_ROLE_FALLBACK;
+  if (!currentModeration) patch.moderation_status = NEW_SIGNUP_PROFILE_DEFAULTS.moderation_status;
+  if (row?.moderation_status === 'rejected') delete patch.moderation_status;
+  if (Object.keys(patch).length === 1) return;
 
   const { error: updateErr } = await supabase.from('profiles').update(patch).eq('user_id', userId);
   if (updateErr) {
@@ -147,8 +154,15 @@ export async function saveProfileTextFromDraft(
   data: OnboardingDraft,
   photoList: string[] = [],
   imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending',
+  profileCompletedOverride?: boolean,
 ): Promise<void> {
-  const profileData = draftToProfileRow(data, userId, photoList, imageUploadStatus);
+  const profileData = draftToProfileRow(
+    data,
+    userId,
+    photoList,
+    imageUploadStatus,
+    profileCompletedOverride,
+  );
 
   let { error } = await supabase.from('profiles').upsert(profileData, { onConflict: 'user_id' });
   if (error) {
@@ -197,18 +211,12 @@ export async function finalizeOnboardingProfile(
   data: OnboardingDraft,
   photoSources: string[],
 ): Promise<FinalizeOnboardingResult> {
+  console.log('onboarding start', { userId, photoSourceCount: photoSources.length });
   let photoUrls: string[] = [];
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
   let profileSyncFailed = false;
 
   await ensureCommunityMemberDefaults(userId);
-
-  try {
-    await saveProfileTextFromDraft(userId, data, [], 'pending');
-  } catch (e) {
-    console.error('[finalizeOnboardingProfile] text save failed', e);
-    profileSyncFailed = true;
-  }
 
   if (photoSources.length > 0) {
     try {
@@ -224,30 +232,59 @@ export async function finalizeOnboardingProfile(
       }
     }
 
-    if (photoUrls.length > 0) {
-      try {
-        await saveProfileTextFromDraft(userId, data, photoUrls, imageUploadStatus);
-      } catch (e) {
-        console.error('[finalizeOnboardingProfile] photo merge save failed', e);
-        profileSyncFailed = true;
-      }
-    } else if (imageUploadStatus === 'failed') {
-      try {
-        await saveProfileTextFromDraft(userId, data, [], 'failed');
-      } catch {
-        profileSyncFailed = true;
-      }
-    }
-  } else {
-    try {
-      await saveProfileTextFromDraft(userId, data, [], 'pending');
-    } catch {
+  }
+
+  const computedImageStatus: 'pending' | 'success' | 'failed' =
+    photoSources.length === 0 ? 'pending' : imageUploadStatus;
+
+  // Save profile only after upload stage settled and URLs were validated.
+  try {
+    console.log('profile save', {
+      userId,
+      imageUploadStatus: computedImageStatus,
+      uploadedCount: photoUrls.length,
+    });
+    await saveProfileTextFromDraft(userId, data, photoUrls, computedImageStatus, false);
+  } catch (e) {
+    console.error('[finalizeOnboardingProfile] text/profile save failed', e);
+    profileSyncFailed = true;
+  }
+
+  const shouldMarkProfileCompleted =
+    !profileSyncFailed &&
+    hasRequiredOnboardingFields({
+      first_name: data.firstName,
+      date_of_birth: data.dateOfBirth
+        ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
+        : null,
+      gender: data.gender,
+      life_niche: data.life_niche,
+      interests: data.interests,
+      questionnaire_responses: data.questionnaireResponses,
+      moderation_status: 'approved',
+      profile_completed: false,
+    }) &&
+    (photoSources.length === 0 || computedImageStatus === 'success');
+
+  if (shouldMarkProfileCompleted) {
+    const { error: completeErr } = await supabase
+      .from('profiles')
+      .update({ profile_completed: true, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    if (completeErr) {
+      console.error('[finalizeOnboardingProfile] profile_completed update failed', completeErr);
       profileSyncFailed = true;
+    } else {
+      console.log('profile_completed update', { userId, profile_completed: true });
     }
   }
 
-  writeSaveProgress(userId, { textSaved: !profileSyncFailed, photoUrls, imageUploadStatus });
-  return { userId, profileSyncFailed, photoUrls, imageUploadStatus };
+  writeSaveProgress(userId, {
+    textSaved: !profileSyncFailed,
+    photoUrls,
+    imageUploadStatus: computedImageStatus,
+  });
+  return { userId, profileSyncFailed, photoUrls, imageUploadStatus: computedImageStatus };
 }
 
 export { uploadPhotoSlot };

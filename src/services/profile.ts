@@ -1,8 +1,10 @@
 import { supabase } from '@/integrations/supabase/client';
+import { DEFAULT_NEW_USER_ROLE_FALLBACK } from '@/lib/profileCompletion';
 
 const UPLOAD_TIMEOUT_MS = 45_000;
 const UPLOAD_MAX_RETRIES = 2;
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_ONBOARDING_UPLOADS = 5;
 
 const HEIC_MIME = new Set(['image/heic', 'image/heif', 'image/heif-sequence', 'image/heic-sequence']);
 
@@ -126,7 +128,7 @@ export async function getMyProfile(userId: string) {
       .upsert(
         {
           user_id: userId,
-          role: 'member',
+          role: DEFAULT_NEW_USER_ROLE_FALLBACK,
           moderation_status: 'approved',
           suitability_status: 'active',
           is_shadow: false,
@@ -221,6 +223,28 @@ export type PhotoSlotResult = {
   error?: string;
 };
 
+export function mapUploadErrorToUserMessage(errorCode?: string): string {
+  const code = (errorCode || '').toLowerCase();
+  if (code.includes('image_too_large') || code.includes('entity too large')) {
+    return 'התמונה גדולה מדי. בחר/י תמונה עד 5MB.';
+  }
+  if (
+    code.includes('invalid_image_type') ||
+    code.includes('unsupported') ||
+    code.includes('mime') ||
+    code.includes('format')
+  ) {
+    return 'פורמט התמונה לא נתמך. נסו JPG/PNG/WEBP.';
+  }
+  if (code.includes('network') || code.includes('timeout') || code.includes('abort')) {
+    return 'חיבור האינטרנט חלש או לא יציב. נסו שוב.';
+  }
+  if (code.includes('image_too_small') || code.includes('empty_blob')) {
+    return 'התמונה לא תקינה. נסו לבחור תמונה אחרת.';
+  }
+  return 'העלאת התמונה נכשלה. אפשר לנסות שוב.';
+}
+
 /** Upload one photo slot with retries; does not throw on failure. */
 export async function uploadPhotoSlot(
   userId: string,
@@ -244,12 +268,18 @@ export async function uploadPhotoSlot(
   let lastErr = '';
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     try {
+      if (source instanceof File) {
+        console.log('UPLOAD START', source.name);
+      } else {
+        console.log('UPLOAD START', `slot-${index}-source`);
+      }
       let file: File;
       if (source instanceof File) {
         file = await prepareImageFileForUpload(source, index);
       } else {
         const res = await fetch(source);
         const blob = await res.blob();
+        if (!blob || blob.size === 0) throw new Error('empty_blob');
         const mime = blob.type || 'image/jpeg';
         const sub = mime.split('/')[1]?.replace(/\+.*$/, '') || 'jpeg';
         const rawFile = new File([blob], `onboarding-${index}.${sub}`, { type: mime });
@@ -262,9 +292,11 @@ export async function uploadPhotoSlot(
       );
       const ok = await verifyPublicPhotoUrl(url);
       if (!ok) throw new Error('photo_url_not_reachable');
+      console.log('UPLOAD SUCCESS', url);
       return { slot: index, url };
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
+      console.error('UPLOAD FAILED', e);
       if (attempt < UPLOAD_MAX_RETRIES) await sleep(400 * (attempt + 1));
     }
   }
@@ -273,7 +305,7 @@ export async function uploadPhotoSlot(
 
 export async function verifyPublicPhotoUrl(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
     return res.ok;
   } catch {
     return false;
@@ -282,20 +314,33 @@ export async function verifyPublicPhotoUrl(url: string): Promise<boolean> {
 
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
 export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
-  const validSources = sources.filter((s) => typeof s === 'string' && s.length > 0);
+  const validSources = sources
+    .filter((s) => typeof s === 'string' && s.length > 0)
+    .slice(0, MAX_ONBOARDING_UPLOADS);
   if (import.meta.env.DEV) {
     console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
   }
+  const settled = await Promise.allSettled(
+    validSources.map((source, i) => uploadPhotoSlot(userId, source, i)),
+  );
+
   const out: string[] = [];
   const errors: { index: number; message: string }[] = [];
-  for (let i = 0; i < validSources.length; i++) {
-    const result = await uploadPhotoSlot(userId, validSources[i], i);
-    if (result.url) out.push(result.url);
-    else if (result.error) {
-      console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: i, message: result.error });
-      errors.push({ index: i, message: result.error });
+
+  settled.forEach((entry, i) => {
+    if (entry.status === 'fulfilled') {
+      const result = entry.value;
+      if (result.url) out.push(result.url);
+      else if (result.error) errors.push({ index: i, message: result.error });
+      return;
     }
+    errors.push({ index: i, message: entry.reason instanceof Error ? entry.reason.message : String(entry.reason) });
+  });
+
+  for (const e of errors) {
+    console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: e.index, message: e.message });
   }
+
   console.info('[uploadOnboardingPhotosFromDataUrls] done', { userId, uploadedCount: out.length });
   if (validSources.length > 0 && out.length === 0) {
     const detail = errors.map((e) => `#${e.index}: ${e.message}`).join('; ');

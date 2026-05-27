@@ -25,6 +25,7 @@ const normalizeString = (value: unknown) =>
 /** Maps onboarding profile (plus names) → columns for public.profiles. Photos stay client-side (Storage). */
 function buildProfilesUpsertRow(
   userId: string,
+  defaultRole: "guest" | "member",
   firstName: string,
   lastName: string,
   profile: Record<string, unknown> | null | undefined,
@@ -34,7 +35,7 @@ function buildProfilesUpsertRow(
     updated_at: new Date().toISOString(),
     profile_completed: false,
     image_upload_status: "pending",
-    role: "member",
+    role: defaultRole,
     moderation_status: "pending",
     suitability_status: "pending",
     is_shadow: false,
@@ -128,36 +129,33 @@ async function findUserIdByEmail(
   return null;
 }
 
-/** Promote guest → community member without overwriting profile fields. */
-async function promoteGuestToMemberIfNeeded(
-  supabaseAdmin: ReturnType<typeof createClient>,
-  userId: string,
-): Promise<void> {
-  const { data: row, error: fetchErr } = await supabaseAdmin
-    .from("profiles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (fetchErr) {
-    console.error("complete-registration promote fetch:", fetchErr);
-    return;
-  }
-  const currentRole = row?.role ?? null;
-  if (currentRole === "member") return;
-  if (currentRole !== "guest" && currentRole !== null) return;
+type NewUserRole = "guest" | "member";
 
-  const { error: updateErr } = await supabaseAdmin
-    .from("profiles")
-    .update({
-      role: "member",
-      moderation_status: "pending",
-      suitability_status: "pending",
-      is_shadow: false,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", userId);
-  if (updateErr) {
-    console.error("complete-registration promote update:", updateErr);
+function normalizeDefaultRole(raw: unknown): NewUserRole {
+  const role = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (role === "guest") return "guest";
+  if (role === "community_member") return "member";
+  if (role === "member") return "member";
+  return "member";
+}
+
+async function getDefaultNewUserRole(
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<NewUserRole> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("system_settings")
+      .select("value")
+      .eq("key", "default_new_user_role")
+      .maybeSingle();
+    if (error) {
+      console.warn("[complete-registration] default role lookup failed, using member", error.message);
+      return "member";
+    }
+    return normalizeDefaultRole(data?.value);
+  } catch (e) {
+    console.warn("[complete-registration] default role lookup crashed, using member", e);
+    return "member";
   }
 }
 
@@ -193,6 +191,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+    const defaultNewUserRole = await getDefaultNewUserRole(supabaseAdmin);
 
     const meta = await getRequestMeta(req);
     const rateKey = `${email}:${meta.ipHash ?? "no-ip"}`;
@@ -257,7 +256,13 @@ Deno.serve(async (req) => {
     // New user only: sync full onboarding row with service role (bypasses RLS). Skip on already_exists to
     // avoid profile takeover when email is not actually being registered in this session.
     if (code === "created" && userId) {
-      const row = buildProfilesUpsertRow(userId, firstName, lastName, profilePayload);
+      const row = buildProfilesUpsertRow(
+        userId,
+        defaultNewUserRole,
+        firstName,
+        lastName,
+        profilePayload,
+      );
       const { error: upsertError } = await supabaseAdmin.from("profiles").upsert(row, {
         onConflict: "user_id",
       });
@@ -274,10 +279,6 @@ Deno.serve(async (req) => {
           500,
         );
       }
-    }
-
-    if (code === "already_exists" && userId) {
-      await promoteGuestToMemberIfNeeded(supabaseAdmin, userId);
     }
 
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({

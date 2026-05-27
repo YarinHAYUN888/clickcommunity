@@ -16,11 +16,17 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import {
+  getDefaultNewUserRoleSetting,
+  setDefaultNewUserRoleSetting,
+  type DefaultNewUserRoleUi,
+} from '@/services/admin';
 
 export default function AdminAutomationPage() {
   const navigate = useNavigate();
   const {
     isSuperUser,
+    isSuperAdmin,
     loading: adminLoading,
     automationTechnicalAccess,
     canToggleAutomationTechnicalView,
@@ -32,6 +38,8 @@ export default function AdminAutomationPage() {
 
   // Manager-side navigation state (hub / wizard / templates / history)
   const [managerSection, setManagerSection] = useState<ManagerSection | 'hub'>('hub');
+  const [defaultRole, setDefaultRole] = useState<DefaultNewUserRoleUi>('community_member');
+  const [defaultRoleLoading, setDefaultRoleLoading] = useState(false);
 
   const validTab = useMemo((): AutomationTabId => {
     return AUTOMATION_TAB_IDS.includes(tab as AutomationTabId) ? (tab as AutomationTabId) : 'templates';
@@ -67,6 +75,43 @@ export default function AdminAutomationPage() {
     if (view !== 'dev') return;
     if (tab !== validTab) setSearchParams({ view: 'dev', tab: validTab }, { replace: true });
   }, [view, tab, validTab, setSearchParams]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let mounted = true;
+    setDefaultRoleLoading(true);
+    void getDefaultNewUserRoleSetting()
+      .then((role) => {
+        if (mounted) setDefaultRole(role);
+      })
+      .catch((e) => {
+        console.error('[AdminAutomationPage] load default_new_user_role failed', e);
+        toast.error('לא הצלחנו לטעון את ברירת המחדל למשתמשים חדשים');
+      })
+      .finally(() => {
+        if (mounted) setDefaultRoleLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [isSuperAdmin]);
+
+  const handleDefaultRoleToggle = useCallback(
+    async (checked: boolean) => {
+      const nextRole: DefaultNewUserRoleUi = checked ? 'community_member' : 'guest';
+      setDefaultRole(nextRole);
+      try {
+        const saved = await setDefaultNewUserRoleSetting(nextRole);
+        setDefaultRole(saved);
+        toast.success('ברירת המחדל נשמרה');
+      } catch (e) {
+        console.error('[AdminAutomationPage] save default_new_user_role failed', e);
+        setDefaultRole((prev) => (prev === 'community_member' ? 'guest' : 'community_member'));
+        toast.error('שמירת ברירת המחדל נכשלה');
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const technical = searchParams.get('technical');
@@ -195,6 +240,37 @@ export default function AdminAutomationPage() {
             </Button>
           )}
         </div>
+
+        {isSuperAdmin && (
+          <div className="mb-4 rounded-2xl border border-violet-100 bg-white/90 px-4 py-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <h3 className="text-sm md:text-base font-semibold text-foreground">
+                  ברירת מחדל למשתמשים חדשים
+                </h3>
+                <p className="text-xs md:text-sm text-muted-foreground">
+                  בחירה זו קובעת איזה סוג משתמש יוגדר אוטומטית בהרשמה חדשה.
+                </p>
+              </div>
+              <span className="text-xs px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50 text-violet-700 font-medium">
+                {defaultRole === 'community_member' ? 'חבר קהילה' : 'אורח'}
+              </span>
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <Label htmlFor="default-new-user-role" className="text-sm cursor-pointer">
+                משתמשים חדשים = חבר קהילה
+              </Label>
+              <Switch
+                id="default-new-user-role"
+                checked={defaultRole === 'community_member'}
+                disabled={defaultRoleLoading}
+                onCheckedChange={(checked) => {
+                  void handleDefaultRoleToggle(checked);
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* ── Main content ─────────────────────────────────────────────── */}
         {isDevView ? (

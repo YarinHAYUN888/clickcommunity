@@ -1,5 +1,17 @@
 import { supabase } from '@/integrations/supabase/client';
 
+export type DefaultNewUserRoleUi = 'community_member' | 'guest';
+type DefaultNewUserRoleDb = 'member' | 'guest';
+
+function toDbRole(role: DefaultNewUserRoleUi): DefaultNewUserRoleDb {
+  return role === 'guest' ? 'guest' : 'member';
+}
+
+function toUiRole(role: string | null | undefined): DefaultNewUserRoleUi {
+  if (role === 'guest') return 'guest';
+  return 'community_member';
+}
+
 export async function checkSuperUser(userId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('profiles')
@@ -58,6 +70,22 @@ export async function performAdminAction(
     throw new Error(String((data as { error: string }).error));
   }
   return data;
+}
+
+export async function getDefaultNewUserRoleSetting(): Promise<DefaultNewUserRoleUi> {
+  const data = await performAdminAction('get_system_setting', 'system', null, {
+    key: 'default_new_user_role',
+  }) as { setting?: { value?: string | null } | null };
+  return toUiRole(data?.setting?.value);
+}
+
+export async function setDefaultNewUserRoleSetting(role: DefaultNewUserRoleUi): Promise<DefaultNewUserRoleUi> {
+  const dbRole = toDbRole(role);
+  const data = await performAdminAction('set_system_setting', 'system', null, {
+    key: 'default_new_user_role',
+    value: dbRole,
+  }) as { setting?: { value?: string | null } | null };
+  return toUiRole(data?.setting?.value ?? dbRole);
 }
 
 export async function updateProfileSuitability(

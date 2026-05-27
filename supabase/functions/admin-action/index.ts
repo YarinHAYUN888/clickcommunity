@@ -40,6 +40,7 @@ Deno.serve(async (req) => {
     if (!adminProfile?.super_role) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: corsHeaders });
     }
+    const isSuperAdmin = adminProfile.super_role === "super_admin";
 
     const { action, target_type, target_id, details } = await req.json();
     if (!action) {
@@ -69,6 +70,41 @@ Deno.serve(async (req) => {
     };
 
     switch (action) {
+      case "get_system_setting": {
+        if (!isSuperAdmin) return respondErr("Forbidden", 403);
+        const key = typeof details?.key === "string" ? details.key.trim() : "";
+        if (!key) return respondErr("details.key required");
+        const { data: setting, error } = await supabaseAdmin
+          .from("system_settings")
+          .select("key, value, updated_at, updated_by")
+          .eq("key", key)
+          .maybeSingle();
+        if (error) return respondErr(error.message, 500);
+        return respond({ setting: setting ?? null });
+      }
+      case "set_system_setting": {
+        if (!isSuperAdmin) return respondErr("Forbidden", 403);
+        const key = typeof details?.key === "string" ? details.key.trim() : "";
+        const value = typeof details?.value === "string" ? details.value.trim() : "";
+        if (!key || !value) return respondErr("details.key and details.value required");
+        if (key !== "default_new_user_role") return respondErr("unsupported setting key");
+        if (!["guest", "member"].includes(value)) return respondErr("invalid setting value");
+        const { data: setting, error } = await supabaseAdmin
+          .from("system_settings")
+          .upsert(
+            {
+              key,
+              value,
+              updated_at: new Date().toISOString(),
+              updated_by: user.id,
+            },
+            { onConflict: "key" },
+          )
+          .select("key, value, updated_at, updated_by")
+          .single();
+        if (error) return respondErr(error.message, 500);
+        return respond({ setting });
+      }
       // ---- User Management ----
       case "update_user_role": {
         await supabaseAdmin.from("profiles").update({ role: details.new_role }).eq("user_id", target_id);

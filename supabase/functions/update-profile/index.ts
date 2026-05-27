@@ -96,10 +96,6 @@ Deno.serve(async (req) => {
     if (error) throw error;
 
     const row = data as Record<string, unknown>;
-    const photosList = Array.isArray(row.photos) ? (row.photos as unknown[]) : [];
-    const hasPhoto =
-      photosList.some((u) => typeof u === "string" && (u as string).trim().length > 0) ||
-      (typeof row.avatar_url === "string" && (row.avatar_url as string).trim().length > 0);
     const fn = typeof row.first_name === "string" ? row.first_name.trim() : "";
     const fnOk = fn.length >= 2;
     const interestsList = Array.isArray(row.interests) ? (row.interests as unknown[]) : [];
@@ -118,7 +114,6 @@ Deno.serve(async (req) => {
     const nicheOk = niche.length === 0 || allowedNiche.has(niche);
     const profileCompleted =
       fnOk &&
-      hasPhoto &&
       interestsOk &&
       dob != null &&
       gender.length > 0 &&

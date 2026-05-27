@@ -5,7 +5,13 @@ import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import InterestPill from '@/components/clicks/InterestPill';
 import { supabase } from '@/integrations/supabase/client';
-import { getMyProfile, updateProfile, uploadPhotoSlot, deleteProfilePhoto } from '@/services/profile';
+import {
+  getMyProfile,
+  updateProfile,
+  uploadPhotoSlot,
+  deleteProfilePhoto,
+  mapUploadErrorToUserMessage,
+} from '@/services/profile';
 import { allInterests } from '@/data/demo';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
@@ -111,7 +117,7 @@ export default function EditProfilePage() {
     try {
       const result = await uploadPhotoSlot(authId, file, uploadSlot);
       if (!result.url) {
-        toast.error(result.error ? `שגיאה בהעלאת תמונה: ${result.error}` : 'שגיאה בהעלאת תמונה');
+        toast.error(mapUploadErrorToUserMessage(result.error));
         return;
       }
       setPhotos(prev => {
@@ -121,7 +127,8 @@ export default function EditProfilePage() {
         return next;
       });
     } catch (err: unknown) {
-      toast.error('שגיאה בהעלאת תמונה');
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(mapUploadErrorToUserMessage(msg));
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };

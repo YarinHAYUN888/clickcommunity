@@ -1,9 +1,19 @@
 import { isValidLifeNiche } from '@/data/lifeNiche';
 import type { SupabaseProfile } from '@/hooks/useCurrentUser';
 
+export type DbNewUserRole = 'guest' | 'member';
+export const DEFAULT_NEW_USER_ROLE_FALLBACK: DbNewUserRole = 'member';
+
+export function normalizeDbNewUserRole(value: unknown): DbNewUserRole {
+  const role = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (role === 'guest') return 'guest';
+  if (role === 'community_member') return 'member';
+  if (role === 'member') return 'member';
+  return DEFAULT_NEW_USER_ROLE_FALLBACK;
+}
+
 /** Defaults applied on new signup (onboarding / complete-registration). */
 export const NEW_SIGNUP_PROFILE_DEFAULTS = {
-  role: 'member' as const,
   moderation_status: 'approved' as const,
   suitability_status: 'active' as const,
   is_shadow: false as const,
