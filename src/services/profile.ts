@@ -285,14 +285,17 @@ export async function uploadPhotoSlot(
         const rawFile = new File([blob], `onboarding-${index}.${sub}`, { type: mime });
         file = await prepareImageFileForUpload(rawFile, index);
       }
+      console.log('PROFILE IMAGE UPLOAD START', { userId, index });
       const url = await withTimeout(
         uploadProfilePhoto(userId, file, index),
         UPLOAD_TIMEOUT_MS,
         `photo-${index}`,
       );
       const ok = await verifyPublicPhotoUrl(url);
-      if (!ok) throw new Error('photo_url_not_reachable');
-      console.log('UPLOAD SUCCESS', url);
+      if (!ok) {
+        console.warn('[uploadPhotoSlot] verify failed but keeping storage URL', { userId, index, url });
+      }
+      console.log('PROFILE IMAGE UPLOAD SUCCESS', { userId, index, url });
       return { slot: index, url };
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
@@ -303,13 +306,17 @@ export async function uploadPhotoSlot(
   return { slot: index, error: lastErr || 'upload_failed' };
 }
 
-export async function verifyPublicPhotoUrl(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
-    return res.ok;
-  } catch {
-    return false;
+export async function verifyPublicPhotoUrl(url: string, retries = 3): Promise<boolean> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (res.ok) return true;
+    } catch {
+      /* retry */
+    }
+    if (attempt < retries - 1) await sleep(350 * (attempt + 1));
   }
+  return false;
 }
 
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
@@ -317,6 +324,9 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
   const validSources = sources
     .filter((s) => typeof s === 'string' && s.length > 0)
     .slice(0, MAX_ONBOARDING_UPLOADS);
+  if (validSources.length > 0) {
+    console.log('PROFILE IMAGE UPLOAD START', { userId, sourceCount: validSources.length });
+  }
   if (import.meta.env.DEV) {
     console.info('[uploadOnboardingPhotosFromDataUrls] start', { userId, sourceCount: validSources.length });
   }

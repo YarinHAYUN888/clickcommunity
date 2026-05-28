@@ -3,6 +3,7 @@ import { normalizeIdentifier } from "../_shared/otpCrypto.ts";
 import { getRequestMeta } from "../_shared/requestMeta.ts";
 import { checkRateLimit } from "../_shared/securityRateLimit.ts";
 import { writeSecurityAudit } from "../_shared/securityAudit.ts";
+import { getDefaultNewUserRole, type NewUserRole } from "../_shared/defaultNewUserRole.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,33 +130,33 @@ async function findUserIdByEmail(
   return null;
 }
 
-type NewUserRole = "guest" | "member";
-
-function normalizeDefaultRole(raw: unknown): NewUserRole {
-  const role = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  if (role === "guest") return "guest";
-  if (role === "community_member") return "member";
-  if (role === "member") return "member";
-  return "member";
-}
-
-async function getDefaultNewUserRole(
+async function applyDefaultRoleToProfile(
   supabaseAdmin: ReturnType<typeof createClient>,
-): Promise<NewUserRole> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("system_settings")
-      .select("value")
-      .eq("key", "default_new_user_role")
-      .maybeSingle();
+  userId: string,
+  defaultRole: NewUserRole,
+): Promise<void> {
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("role, subscription_status")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!profile) return;
+  if (profile.subscription_status === "active") return;
+  if (profile.role === defaultRole) return;
+  if (profile.role === "member" && defaultRole === "guest") return;
+
+  if (!profile.role || profile.role === "guest") {
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ role: defaultRole, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
     if (error) {
-      console.warn("[complete-registration] default role lookup failed, using member", error.message);
-      return "member";
+      console.error("[complete-registration] role patch failed", error.message);
+      return;
     }
-    return normalizeDefaultRole(data?.value);
-  } catch (e) {
-    console.warn("[complete-registration] default role lookup crashed, using member", e);
-    return "member";
+    console.log("ROLE ASSIGNED", { userId, role: defaultRole });
+    console.log("USER CREATED WITH ROLE", { userId, role: defaultRole });
   }
 }
 
@@ -279,6 +280,9 @@ Deno.serve(async (req) => {
           500,
         );
       }
+      console.log("USER CREATED WITH ROLE", { userId, role: defaultNewUserRole });
+    } else if (code === "already_exists" && userId) {
+      await applyDefaultRoleToProfile(supabaseAdmin, userId, defaultNewUserRole);
     }
 
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
@@ -309,6 +313,7 @@ Deno.serve(async (req) => {
       code,
       userId,
       tokenHash,
+      defaultRole: defaultNewUserRole,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

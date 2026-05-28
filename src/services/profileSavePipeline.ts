@@ -2,7 +2,6 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
 import { isValidLifeNiche } from '@/data/lifeNiche';
 import {
-  DEFAULT_NEW_USER_ROLE_FALLBACK,
   hasRequiredOnboardingFields,
   NEW_SIGNUP_PROFILE_DEFAULTS,
 } from '@/lib/profileCompletion';
@@ -116,14 +115,27 @@ function draftToProfileRow(
   return row;
 }
 
+/** Apply system_settings default role via Edge (service role). */
+export async function applyDefaultUserRole(userId: string): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('apply-default-user-role', {
+    body: { user_id: userId },
+  });
+  if (error) {
+    console.warn('[applyDefaultUserRole] invoke failed', error.message);
+    return;
+  }
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    console.warn('[applyDefaultUserRole] edge error', data);
+  }
+}
+
 /**
- * Idempotent profile defaults patch.
- * Important: does NOT override existing role (guest/member).
+ * Idempotent moderation defaults only (role handled by applyDefaultUserRole).
  */
 export async function ensureCommunityMemberDefaults(userId: string): Promise<void> {
   const { data: row, error: fetchErr } = await supabase
     .from('profiles')
-    .select('role, moderation_status')
+    .select('moderation_status')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -132,15 +144,14 @@ export async function ensureCommunityMemberDefaults(userId: string): Promise<voi
     return;
   }
 
-  const role = row?.role ?? null;
   const currentModeration = row?.moderation_status ?? null;
-  if (role && currentModeration) return;
+  if (currentModeration) return;
 
-  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (!role) patch.role = DEFAULT_NEW_USER_ROLE_FALLBACK;
-  if (!currentModeration) patch.moderation_status = NEW_SIGNUP_PROFILE_DEFAULTS.moderation_status;
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+    moderation_status: NEW_SIGNUP_PROFILE_DEFAULTS.moderation_status,
+  };
   if (row?.moderation_status === 'rejected') delete patch.moderation_status;
-  if (Object.keys(patch).length === 1) return;
 
   const { error: updateErr } = await supabase.from('profiles').update(patch).eq('user_id', userId);
   if (updateErr) {
@@ -196,6 +207,32 @@ export async function saveProfileTextFromDraft(
   writeSaveProgress(userId, { textSaved: true, photoUrls: photoList, imageUploadStatus });
 }
 
+/** Persist uploaded photo URLs on profile (explicit step after Storage upload). */
+export async function persistProfilePhotoUrls(
+  userId: string,
+  photoUrls: string[],
+): Promise<'success' | 'failed' | 'skipped'> {
+  if (photoUrls.length === 0) return 'skipped';
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      photos: photoUrls,
+      avatar_url: photoUrls[0],
+      image_upload_status: 'success',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('PROFILE IMAGE SAVE FAILED', { userId, message: error.message });
+    return 'failed';
+  }
+
+  console.log('PROFILE IMAGE URL SAVED', { userId, count: photoUrls.length, avatar_url: photoUrls[0] });
+  return 'success';
+}
+
 export type FinalizeOnboardingResult = {
   userId: string;
   profileSyncFailed: boolean;
@@ -216,6 +253,7 @@ export async function finalizeOnboardingProfile(
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
   let profileSyncFailed = false;
 
+  await applyDefaultUserRole(userId);
   await ensureCommunityMemberDefaults(userId);
 
   if (photoSources.length > 0) {
@@ -250,6 +288,19 @@ export async function finalizeOnboardingProfile(
     profileSyncFailed = true;
   }
 
+  if (photoUrls.length > 0 && !profileSyncFailed) {
+    const photoPersist = await persistProfilePhotoUrls(userId, photoUrls);
+    if (photoPersist === 'failed') {
+      profileSyncFailed = true;
+      imageUploadStatus = 'failed';
+    } else if (photoPersist === 'success') {
+      imageUploadStatus = 'success';
+    }
+  }
+
+  const finalImageStatus: 'pending' | 'success' | 'failed' =
+    photoSources.length === 0 ? 'pending' : imageUploadStatus;
+
   const shouldMarkProfileCompleted =
     !profileSyncFailed &&
     hasRequiredOnboardingFields({
@@ -264,7 +315,7 @@ export async function finalizeOnboardingProfile(
       moderation_status: 'approved',
       profile_completed: false,
     }) &&
-    (photoSources.length === 0 || computedImageStatus === 'success');
+    (photoSources.length === 0 || (photoUrls.length > 0 && finalImageStatus === 'success'));
 
   if (shouldMarkProfileCompleted) {
     const { error: completeErr } = await supabase
@@ -282,9 +333,9 @@ export async function finalizeOnboardingProfile(
   writeSaveProgress(userId, {
     textSaved: !profileSyncFailed,
     photoUrls,
-    imageUploadStatus: computedImageStatus,
+    imageUploadStatus: finalImageStatus,
   });
-  return { userId, profileSyncFailed, photoUrls, imageUploadStatus: computedImageStatus };
+  return { userId, profileSyncFailed, photoUrls, imageUploadStatus: finalImageStatus };
 }
 
 export { uploadPhotoSlot };

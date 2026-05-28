@@ -1175,12 +1175,17 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
       if (result.profileSyncFailed) {
         toast.warning(getHebrewOnboardingMessage('onboarding_finalize_partial'));
-      } else if (
+        setPostAuthBusy(false);
+        return;
+      }
+      if (
         onboardingPhotos.length > 0 &&
         result.photoUrls.length === 0 &&
         result.imageUploadStatus !== 'success'
       ) {
-        toast.warning(getHebrewOnboardingMessage('photo_upload_partial'));
+        toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
+        setPostAuthBusy(false);
+        return;
       }
 
       if (result.route === '/clicks' || result.route === '/pending-review') {

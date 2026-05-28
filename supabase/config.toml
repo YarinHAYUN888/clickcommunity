@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.complete-registration]
 verify_jwt = false
 
+[functions.apply-default-user-role]
+verify_jwt = true
+
 [functions.issue-onboarding-otp]
 verify_jwt = false
 

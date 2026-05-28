@@ -114,8 +114,22 @@ Deno.serve(async (req) => {
       }
       // ---- User Management ----
       case "update_user_role": {
-        await supabaseAdmin.from("profiles").update({ role: details.new_role }).eq("user_id", target_id);
-        return respond({ updated: "role" });
+        const rawRole = typeof details?.new_role === "string" ? details.new_role.trim().toLowerCase() : "";
+        let role = rawRole;
+        if (role === "community_member") role = "member";
+        if (!["guest", "member"].includes(role)) {
+          return respondErr("invalid role; use guest or member", 400);
+        }
+        const { error: roleErr } = await supabaseAdmin
+          .from("profiles")
+          .update({ role, updated_at: new Date().toISOString() })
+          .eq("user_id", target_id);
+        if (roleErr) {
+          console.error("ADMIN ROLE UPDATE FAILED", { target_id, role, message: roleErr.message });
+          return respondErr(roleErr.message, 500);
+        }
+        console.log("ADMIN ROLE UPDATE", { target_id, role });
+        return respond({ updated: "role", role });
       }
       case "update_user_status": {
         await supabaseAdmin.from("profiles").update({ status: details.new_status }).eq("user_id", target_id);

@@ -83,15 +83,42 @@ export default function AdminUsersPage() {
     })();
   }, [selectedUser]);
 
-  const doAction = async (action: string, targetId: string, details?: any) => {
+  const doAction = async (
+    action: string,
+    targetId: string,
+    details?: Record<string, unknown>,
+    options?: { keepDrawerOpen?: boolean },
+  ) => {
     setActionLoading(true);
     try {
-      await performAdminAction(action, 'user', targetId, details);
+      const result = await performAdminAction(action, 'user', targetId, details) as {
+        role?: string;
+        error?: string;
+      };
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
       toast.success('הפעולה בוצעה בהצלחה ✓');
-      setSelectedUser(null);
       setConfirmAction(null);
-      fetchUsers();
-    } catch { toast.error('שגיאה בביצוע הפעולה'); }
+      await fetchUsers();
+      const assignedRole =
+        typeof result?.role === 'string'
+          ? result.role
+          : typeof details?.new_role === 'string'
+            ? details.new_role
+            : undefined;
+      if (options?.keepDrawerOpen && assignedRole) {
+        setSelectedUser((prev) =>
+          prev && prev.user_id === targetId ? { ...prev, role: assignedRole } : prev,
+        );
+      } else if (!options?.keepDrawerOpen) {
+        setSelectedUser(null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'שגיאה בביצוע הפעולה';
+      toast.error(message);
+    }
     setActionLoading(false);
   };
 
@@ -311,7 +338,11 @@ export default function AdminUsersPage() {
                     {['guest', 'member'].map(r => (
                       <button
                         key={r}
-                        onClick={() => doAction('update_user_role', selectedUser.user_id, { new_role: r })}
+                        onClick={() =>
+                          doAction('update_user_role', selectedUser.user_id, { new_role: r }, {
+                            keepDrawerOpen: true,
+                          })
+                        }
                         disabled={actionLoading || selectedUser.role === r}
                         className={`flex-1 h-10 rounded-xl text-xs font-medium transition-colors ${
                           selectedUser.role === r ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-foreground'
