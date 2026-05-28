@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import PremiumButton from '@/components/ui/PremiumButton';
+import { Switch } from '@/components/ui/switch';
 import { PremiumDatePicker, PremiumTimePicker } from '@/components/admin/PremiumDateTimePickers';
 import { useAdmin } from '@/contexts/AdminContext';
 import { performAdminAction, uploadEventCover } from '@/services/admin';
@@ -237,7 +238,7 @@ export default function AdminEventFormPage() {
   const [form, setForm] = useState({
     name: '', date: '', time: '', location_name: '', location_address: '', location_url: '',
     description: '', max_capacity: 40, reserved_new_spots: 10, gender_balance_target: 0.5,
-    cover_image_url: '',
+    cover_image_url: '', requires_subscription: false,
   });
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
@@ -257,6 +258,7 @@ export default function AdminEventFormPage() {
           location_url: data.location_url || '', description: data.description || '',
           max_capacity: data.max_capacity || 40, reserved_new_spots: data.reserved_new_spots || 10,
           gender_balance_target: Number(data.gender_balance_target) || 0.5, cover_image_url: data.cover_image_url || '',
+          requires_subscription: data.requires_subscription === true,
         });
         setLoading(false);
       });
@@ -300,6 +302,7 @@ export default function AdminEventFormPage() {
         reserved_new_spots: reservedNewSpots,
         gender_balance_target: genderBalanceTarget,
         cover_image_url: toOptional(cover_image_url),
+        requires_subscription: form.requires_subscription,
       };
       if (isEdit) {
         await performAdminAction('update_event', 'event', eventId, eventData);
@@ -517,6 +520,38 @@ export default function AdminEventFormPage() {
                   className="w-full accent-primary"
                 />
               </FieldRow>
+            </div>
+
+            <hr className="divider-fade" />
+
+            {/* Section: access */}
+            <div className="space-y-4">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/60">
+                הרשאות הרשמה
+              </h3>
+              <div className="rounded-2xl border border-primary/20 bg-white/75 px-4 py-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold text-foreground">גישה לאירוע</h4>
+                    <p className="text-xs text-muted-foreground">
+                      בחירה זו קובעת האם משתמשים ללא מנוי יכולים להירשם לאירוע.
+                    </p>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50 text-violet-700 font-medium">
+                    {form.requires_subscription ? 'האירוע דורש מנוי' : 'האירוע פתוח לכולם'}
+                  </span>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <label htmlFor="requires-subscription" className="text-sm cursor-pointer">
+                    האירוע דורש מנוי
+                  </label>
+                  <Switch
+                    id="requires-subscription"
+                    checked={form.requires_subscription}
+                    onCheckedChange={(checked) => setForm((f) => ({ ...f, requires_subscription: !!checked }))}
+                  />
+                </div>
+              </div>
             </div>
 
             <hr className="divider-fade" />

@@ -71,21 +71,63 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("role, super_role")
+      .select("role, super_role, subscription_status")
       .eq("user_id", user.id)
       .maybeSingle();
-    const role = profile?.super_role ? "admin" : profile?.role;
-    if (!["member", "admin"].includes(role || "")) {
-      return new Response(JSON.stringify({ error: "Registration is available for members only" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (profileError) {
+      return new Response(JSON.stringify({ error: "profile_lookup_failed" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    const role = profile?.super_role ? "admin" : profile?.role;
+
+    if (event.requires_subscription === true && role !== "admin") {
+      const { data: activeSubscription, error: subError } = await supabase
+        .from("subscriptions")
+        .select("id, status, current_period_end")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("current_period_end", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (subError) {
+        console.error("subscription lookup failed", subError);
+        return new Response(
+          JSON.stringify({
+            error: "subscription_validation_unavailable",
+            message: "Failed to validate subscription status. Please try again.",
+          }),
+          {
+            status: 503,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      const hasActiveSubscription =
+        !!activeSubscription ||
+        profile?.subscription_status === "active";
+
+      if (!hasActiveSubscription) {
+        return new Response(
+          JSON.stringify({
+            error: "subscription_required",
+            message: "This event requires an active subscription.",
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
     }
 
     const monthlyCap = Math.max(1, Math.min(31, Number(Deno.env.get("MONTHLY_EVENT_REGISTRATION_CAP") || "3")));
 
-    if (role !== "admin") {
+    if (role !== "admin" && role === "member") {
       const { data: monthRegs, error: monthErr } = await supabase
         .from("event_registrations")
         .select("created_at")

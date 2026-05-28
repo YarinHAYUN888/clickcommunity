@@ -68,6 +68,13 @@ Deno.serve(async (req) => {
         throw new Error(error.message || fallback);
       }
     };
+    const sanitizeEventDetails = (raw: Record<string, unknown>) => {
+      const next = { ...raw };
+      if ("requires_subscription" in next) {
+        next.requires_subscription = next.requires_subscription === true;
+      }
+      return next;
+    };
 
     switch (action) {
       case "get_system_setting": {
@@ -178,12 +185,14 @@ Deno.serve(async (req) => {
 
       // ---- Event Management ----
       case "create_event": {
-        const { data: ev, error } = await supabaseAdmin.from("events").insert({ ...details, created_by: user.id }).select().single();
+        const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>);
+        const { data: ev, error } = await supabaseAdmin.from("events").insert({ ...safeDetails, created_by: user.id }).select().single();
         if (error) return respondErr(error.message);
         return respond({ event: ev });
       }
       case "update_event": {
-        await supabaseAdmin.from("events").update(details).eq("id", target_id);
+        const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>);
+        await supabaseAdmin.from("events").update(safeDetails).eq("id", target_id);
         return respond({});
       }
       case "cancel_event": {

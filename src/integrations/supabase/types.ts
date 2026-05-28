@@ -523,6 +523,7 @@ export type Database = {
           max_capacity: number
           name: string
           reserved_new_spots: number
+          requires_subscription: boolean
           status: string
           time: string
           updated_at: string | null
@@ -543,6 +544,7 @@ export type Database = {
           max_capacity?: number
           name: string
           reserved_new_spots?: number
+          requires_subscription?: boolean
           status?: string
           time: string
           updated_at?: string | null
@@ -563,6 +565,7 @@ export type Database = {
           max_capacity?: number
           name?: string
           reserved_new_spots?: number
+          requires_subscription?: boolean
           status?: string
           time?: string
           updated_at?: string | null

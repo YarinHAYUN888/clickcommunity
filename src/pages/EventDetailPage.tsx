@@ -6,7 +6,7 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAdmin } from '@/contexts/AdminContext';
@@ -122,7 +122,7 @@ export default function EventDetailPage() {
 
   const handleRegister = async () => {
     if (!eventId || !authId) return;
-    if (role === 'guest') {
+    if (event?.requires_subscription && role === 'guest') {
       sonner('ההרשמה לאירועים לחברי קהילה', {
         description: 'עברו למנוי כדי להירשם עד 3 אירועים בחודש וליהנות מכל התכונות.',
         duration: 6000,
@@ -160,6 +160,13 @@ export default function EventDetailPage() {
     } catch (err: unknown) {
       if (err instanceof MonthlyEventLimitError) {
         sonner.error(`ניצלת את מכסת האירועים לחודש (${err.cap}). נסו שוב בחודש הבא.`);
+      } else if (err instanceof SubscriptionRequiredError) {
+        sonner('האירוע דורש מנוי פעיל', {
+          description: 'כדי להירשם לאירוע זה צריך מנוי פעיל.',
+          duration: 6000,
+        });
+      } else if (err instanceof SubscriptionValidationUnavailableError) {
+        sonner.error('לא הצלחנו לאמת מנוי כרגע. נסו שוב בעוד רגע.');
       } else {
         toast({ title: 'שגיאה', description: err instanceof Error ? err.message : 'נסו שוב', variant: 'destructive' });
       }
@@ -222,7 +229,7 @@ export default function EventDetailPage() {
     registration?.status === 'registered' ||
     registration?.status === 'approved' ||
     registration?.status === 'checked_in';
-  const canRegister = role === 'member';
+  const canRegister = event.requires_subscription ? role === 'member' : !!authId;
   const qrValue =
     registration?.entry_code && event
       ? `${window.location.origin}/events/${event.id}?ticket=${encodeURIComponent(registration.entry_code)}`
@@ -249,6 +256,20 @@ export default function EventDetailPage() {
         </button>
         <div className="absolute top-4 start-4">
           <StatusBadge status={event.status} />
+        </div>
+        <div className="absolute top-4 start-28">
+          <span
+            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold text-white"
+            style={{
+              background: event.requires_subscription
+                ? 'rgba(15,23,42,0.78)'
+                : 'rgba(5,150,105,0.82)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+            }}
+          >
+            {event.requires_subscription ? '🔒 דורש מנוי' : '🌍 פתוח לקהילה'}
+          </span>
         </div>
       </div>
 
@@ -538,7 +559,7 @@ export default function EventDetailPage() {
               </div>
             ) : (
               <button
-                onClick={role === 'guest' ? () => navigate('/subscription') : handleRegister}
+                onClick={event.requires_subscription && role === 'guest' ? () => navigate('/subscription') : handleRegister}
                 disabled={
                   registering ||
                   !authId ||
@@ -554,7 +575,7 @@ export default function EventDetailPage() {
                 {!canRegister ? (
                   <>
                     <Lock size={16} />
-                    הרשמה לחברי קהילה בלבד
+                    {!authId ? 'התחבר/י כדי להירשם' : 'האירוע דורש מנוי פעיל'}
                   </>
                 ) : registering ? '...' : event.status === 'full' ? 'הצטרף/י לרשימת המתנה' : 'הירשם/י'}
               </button>

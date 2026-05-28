@@ -107,8 +107,22 @@ export default function EventCard({ event, index }: EventCardProps) {
           <div className="absolute top-3 start-3">
             <StatusBadge status={event.status} />
           </div>
+          <div className="absolute top-3 end-3">
+            <span
+              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold text-white"
+              style={{
+                background: event.requires_subscription
+                  ? 'rgba(15,23,42,0.74)'
+                  : 'rgba(5,150,105,0.78)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+              }}
+            >
+              {event.requires_subscription ? '🔒 דורש מנוי' : '🌍 פתוח לקהילה'}
+            </span>
+          </div>
           {isPast && event.is_past_voting_open && (
-            <div className="absolute top-3 end-3">
+            <div className="absolute top-12 end-3">
               <motion.span
                 animate={{ opacity: [0.7, 1, 0.7] }}
                 transition={{ duration: 2, repeat: Infinity }}

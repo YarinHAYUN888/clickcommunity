@@ -17,6 +17,7 @@ export interface EventRow {
   host_id: string | null;
   max_capacity: number;
   reserved_new_spots: number;
+  requires_subscription: boolean;
   gender_balance_target: number;
   status: 'open' | 'almost_full' | 'full' | 'past' | 'cancelled';
   is_past_voting_open: boolean;
@@ -333,6 +334,20 @@ export class MonthlyEventLimitError extends Error {
   }
 }
 
+export class SubscriptionRequiredError extends Error {
+  constructor() {
+    super('subscription_required');
+    this.name = 'SubscriptionRequiredError';
+  }
+}
+
+export class SubscriptionValidationUnavailableError extends Error {
+  constructor() {
+    super('subscription_validation_unavailable');
+    this.name = 'SubscriptionValidationUnavailableError';
+  }
+}
+
 function extractFunctionErrorBody(data: unknown, fnError: unknown): Record<string, unknown> | null {
   if (data && typeof data === 'object') return data as Record<string, unknown>;
   const ctx = fnError as { context?: { body?: unknown } } | null;
@@ -422,15 +437,6 @@ export async function cancelEventRegistration(eventId: string) {
 export async function registerForEvent(eventId: string) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) throw new Error('Not authenticated');
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, super_role')
-    .eq('user_id', session.user.id)
-    .maybeSingle();
-  const role = profile?.super_role ? 'admin' : profile?.role;
-  if (!['member', 'admin'].includes(role || '')) {
-    throw new Error('Registration is available for members only');
-  }
 
   const { data, error } = await supabase.functions.invoke('register-for-event', {
     body: { event_id: eventId },
@@ -438,6 +444,12 @@ export async function registerForEvent(eventId: string) {
   const body = extractFunctionErrorBody(data, error);
   if (body?.error === 'monthly_event_limit_reached') {
     throw new MonthlyEventLimitError(Number(body.used) || 0, Number(body.cap) || DEFAULT_MONTHLY_EVENT_CAP);
+  }
+  if (body?.error === 'subscription_required') {
+    throw new SubscriptionRequiredError();
+  }
+  if (body?.error === 'subscription_validation_unavailable') {
+    throw new SubscriptionValidationUnavailableError();
   }
   if (error) {
     const msg = typeof body?.message === 'string' ? body.message : error.message;
