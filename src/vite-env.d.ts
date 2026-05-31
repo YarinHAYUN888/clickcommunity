@@ -20,4 +20,6 @@ interface ImportMetaEnv {
   readonly VITE_COMMUNITY_NAME?: string;
   readonly VITE_COMMUNITY_URL?: string;
   readonly VITE_SUPPORT_EMAIL?: string;
+  /** Optional override for landing hero background loop (defaults to /hero/hero-loop.mp4). */
+  readonly VITE_HERO_VIDEO_URL?: string;
 }

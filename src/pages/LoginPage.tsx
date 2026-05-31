@@ -5,6 +5,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import BackToLandingButton from '@/components/ui/BackToLandingButton';
 import { supabase } from '@/integrations/supabase/client';
+import { getLoginErrorMessage } from '@/lib/authErrors';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import ClicksLogo from '@/components/ui/ClicksLogo';
@@ -26,13 +27,13 @@ export default function LoginPage() {
 
     try {
       const { error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password,
       });
 
       if (authError) {
-        console.error('Login error:', authError);
-        setError('אימייל או סיסמה שגויים');
+        console.error('Login error:', authError.status, authError.message);
+        setError(getLoginErrorMessage(authError));
         setLoading(false);
         return;
       }

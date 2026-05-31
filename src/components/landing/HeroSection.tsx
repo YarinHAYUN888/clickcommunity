@@ -1,13 +1,21 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MagneticButton from './MagneticButton';
-import GradientText from './GradientText';
 import CursorFollower from './CursorFollower';
 import clickHeroLogo from '@/assets/click-hero-logo.png';
+import { normalizeEnvValue } from '@/lib/envUtils';
 
-const HERO_VIDEO_URL =
+/** Self-hosted loop — avoids Supabase Storage egress (hero video was a major quota consumer). */
+const LOCAL_HERO_VIDEO = '/hero/hero-loop.mp4';
+const LEGACY_SUPABASE_HERO_VIDEO =
   'https://lwprevqahebqenpzdvle.supabase.co/storage/v1/object/public/hero-videos/copy_01EEA577-1BF7-4FA5-9F19-92175F9217B6.mov';
+
+const HERO_VIDEO_SOURCES = [
+  normalizeEnvValue(import.meta.env.VITE_HERO_VIDEO_URL) ?? LOCAL_HERO_VIDEO,
+  LOCAL_HERO_VIDEO,
+  LEGACY_SUPABASE_HERO_VIDEO,
+].filter((url, index, all) => url && all.indexOf(url) === index);
 
 const HEAD_LINE_2_PRE = 'הסביבה החדשה ';
 const HEAD_LINE_2_HL = 'שלכם';
@@ -87,11 +95,55 @@ export default function HeroSection() {
   const navigate = useNavigate();
   const reduce = useReducedMotion();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const activeSrc = HERO_VIDEO_SOURCES[sourceIndex] ?? LOCAL_HERO_VIDEO;
 
-  // Respect prefers-reduced-motion: pause the video so a static frame is shown
-  useEffect(() => {
-    if (reduce && videoRef.current) videoRef.current.pause();
+  const tryPlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || reduce) return;
+    video.muted = true;
+    video.loop = true;
+    if (video.paused) {
+      void video.play().catch(() => {
+        /* autoplay policies — retry on interaction via visibilitychange */
+      });
+    }
   }, [reduce]);
+
+  useEffect(() => {
+    if (reduce) {
+      videoRef.current?.pause();
+      return;
+    }
+    tryPlay();
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.addEventListener('canplay', tryPlay);
+    video.addEventListener('loadeddata', tryPlay);
+    video.addEventListener('ended', tryPlay);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tryPlay();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      video.removeEventListener('canplay', tryPlay);
+      video.removeEventListener('loadeddata', tryPlay);
+      video.removeEventListener('ended', tryPlay);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [reduce, tryPlay, activeSrc]);
+
+  const handleVideoError = () => {
+    const next = sourceIndex + 1;
+    if (next < HERO_VIDEO_SOURCES.length) {
+      setSourceIndex(next);
+      return;
+    }
+    setVideoFailed(true);
+  };
 
   return (
     <section
@@ -102,18 +154,34 @@ export default function HeroSection() {
       <CursorFollower />
 
       {/* Layer 0: Hero video (deepest background) */}
-      <video
-        ref={videoRef}
-        src={HERO_VIDEO_URL}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        aria-hidden
-        tabIndex={-1}
-        className="absolute inset-0 -z-20 w-full h-full object-cover pointer-events-none select-none"
-      />
+      {!videoFailed && (
+        <video
+          key={activeSrc}
+          ref={videoRef}
+          src={activeSrc}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          disablePictureInPicture
+          aria-hidden
+          tabIndex={-1}
+          onError={handleVideoError}
+          className="absolute inset-0 -z-20 w-full h-full object-cover pointer-events-none select-none"
+        />
+      )}
+
+      {videoFailed && (
+        <div
+          className="pointer-events-none absolute inset-0 -z-20 animate-grid-drift"
+          aria-hidden
+          style={{
+            background:
+              'radial-gradient(ellipse 80% 60% at 50% 40%, rgba(124,58,237,0.35) 0%, transparent 55%), linear-gradient(180deg, #0F0F1A 0%, #1a1033 50%, #0F0F1A 100%)',
+          }}
+        />
+      )}
 
       {/* Layer 0.5: Black overlay — keeps the text crisp over the video */}
       <div
