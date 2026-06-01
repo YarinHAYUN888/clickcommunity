@@ -4,6 +4,7 @@ import { getRequestMeta } from "../_shared/requestMeta.ts";
 import { checkRateLimit } from "../_shared/securityRateLimit.ts";
 import { writeSecurityAudit } from "../_shared/securityAudit.ts";
 import { getDefaultNewUserRole, type NewUserRole } from "../_shared/defaultNewUserRole.ts";
+import { verifyProfileRole } from "../_shared/verifyProfileRole.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,8 +38,8 @@ function buildProfilesUpsertRow(
     profile_completed: false,
     image_upload_status: "pending",
     role: defaultRole,
-    moderation_status: "pending",
-    suitability_status: "pending",
+    moderation_status: "approved",
+    suitability_status: "active",
     is_shadow: false,
   };
 
@@ -153,6 +154,11 @@ async function applyDefaultRoleToProfile(
       .eq("user_id", userId);
     if (error) {
       console.error("[complete-registration] role patch failed", error.message);
+      return;
+    }
+    const verified = await verifyProfileRole(supabaseAdmin, userId, defaultRole);
+    if (!verified.ok) {
+      console.error("[complete-registration] role verify failed", verified);
       return;
     }
     console.log("ROLE ASSIGNED", { userId, role: defaultRole });
@@ -277,6 +283,17 @@ Deno.serve(async (req) => {
             error: upsertError.message,
             diagnostics: { stage: "profile_upsert", code: upsertError.code },
           },
+          500,
+        );
+      }
+      const roleVerified = await verifyProfileRole(supabaseAdmin, userId, defaultNewUserRole);
+      if (!roleVerified.ok) {
+        console.error("complete-registration role verify failed", roleVerified);
+        await supabaseAdmin.auth.admin.deleteUser(userId).catch((e) =>
+          console.error("complete-registration rollback deleteUser:", e)
+        );
+        return json(
+          { error: roleVerified.message, diagnostics: { stage: "profile_role_verify" } },
           500,
         );
       }

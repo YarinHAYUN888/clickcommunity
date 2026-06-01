@@ -4,7 +4,8 @@ import {
   optionsOk,
   requireAuthUser,
 } from "../_shared/edgeAuth.ts";
-import { getDefaultNewUserRole } from "../_shared/defaultNewUserRole.ts";
+import { getDefaultNewUserRole, type NewUserRole } from "../_shared/defaultNewUserRole.ts";
+import { verifyProfileRole } from "../_shared/verifyProfileRole.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return optionsOk();
@@ -46,28 +47,27 @@ Deno.serve(async (req) => {
     }
 
     if (!currentRole || currentRole === "guest") {
-      if (subStatus === "active") {
-        const { error: promoteErr } = await auth.admin
-          .from("profiles")
-          .update({ role: "member", updated_at: new Date().toISOString() })
-          .eq("user_id", userId);
-        if (promoteErr) return jsonResponse({ error: promoteErr.message }, 500);
-        console.log("ROLE ASSIGNED", { userId, role: "member", reason: "active_subscription" });
-        return jsonResponse({ success: true, role: "member" });
-      }
-
+      const targetRole: NewUserRole = subStatus === "active" ? "member" : defaultRole;
       const { error: updateErr } = await auth.admin
         .from("profiles")
-        .update({ role: defaultRole, updated_at: new Date().toISOString() })
+        .update({ role: targetRole, updated_at: new Date().toISOString() })
         .eq("user_id", userId);
 
       if (updateErr) {
         return jsonResponse({ error: updateErr.message }, 500);
       }
 
-      console.log("ROLE ASSIGNED", { userId, role: defaultRole });
-      console.log("USER CREATED WITH ROLE", { userId, role: defaultRole });
-      return jsonResponse({ success: true, role: defaultRole });
+      const verified = await verifyProfileRole(auth.admin, userId, targetRole);
+      if (!verified.ok) {
+        return jsonResponse({ error: verified.message }, 500);
+      }
+
+      console.log("ROLE ASSIGNED", {
+        userId,
+        role: targetRole,
+        reason: subStatus === "active" ? "active_subscription" : "default_setting",
+      });
+      return jsonResponse({ success: true, role: verified.role });
     }
 
     return jsonResponse({ success: true, role: currentRole, skipped: true });

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { verifyProfileRole, type DbProfileRole } from "../_shared/verifyProfileRole.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -114,22 +115,28 @@ Deno.serve(async (req) => {
       }
       // ---- User Management ----
       case "update_user_role": {
+        if (!target_id) return respondErr("target_id required");
         const rawRole = typeof details?.new_role === "string" ? details.new_role.trim().toLowerCase() : "";
         let role = rawRole;
         if (role === "community_member") role = "member";
         if (!["guest", "member"].includes(role)) {
           return respondErr("invalid role; use guest or member", 400);
         }
+        const expectedRole = role as DbProfileRole;
         const { error: roleErr } = await supabaseAdmin
           .from("profiles")
-          .update({ role, updated_at: new Date().toISOString() })
+          .update({ role: expectedRole, updated_at: new Date().toISOString() })
           .eq("user_id", target_id);
         if (roleErr) {
-          console.error("ADMIN ROLE UPDATE FAILED", { target_id, role, message: roleErr.message });
+          console.error("ADMIN ROLE UPDATE FAILED", { target_id, role: expectedRole, message: roleErr.message });
           return respondErr(roleErr.message, 500);
         }
-        console.log("ADMIN ROLE UPDATE", { target_id, role });
-        return respond({ updated: "role", role });
+        const verified = await verifyProfileRole(supabaseAdmin, target_id, expectedRole);
+        if (!verified.ok) {
+          return respondErr(verified.message, 500);
+        }
+        console.log("ADMIN ROLE UPDATE", { target_id, role: expectedRole });
+        return respond({ updated: "role", role: verified.role });
       }
       case "update_user_status": {
         await supabaseAdmin.from("profiles").update({ status: details.new_status }).eq("user_id", target_id);
@@ -176,25 +183,47 @@ Deno.serve(async (req) => {
         return respond({});
       }
       case "grant_free_subscription": {
+        if (!target_id) return respondErr("target_id required");
         await supabaseAdmin.from("subscriptions").upsert({
           user_id: target_id, status: "active", plan: "monthly", amount: 0, currency: "ILS",
           current_period_start: new Date().toISOString(),
           current_period_end: new Date(Date.now() + 30 * 86400000).toISOString(),
         }, { onConflict: "user_id" });
-        await supabaseAdmin.from("profiles").update({ role: "member", subscription_status: "active" }).eq("user_id", target_id);
-        return respond({});
+        const { error: grantErr } = await supabaseAdmin
+          .from("profiles")
+          .update({ role: "member", subscription_status: "active", updated_at: new Date().toISOString() })
+          .eq("user_id", target_id);
+        if (grantErr) return respondErr(grantErr.message, 500);
+        const grantVerified = await verifyProfileRole(supabaseAdmin, target_id, "member");
+        if (!grantVerified.ok) return respondErr(grantVerified.message, 500);
+        return respond({ role: grantVerified.role });
       }
       case "revoke_free_subscription": {
+        if (!target_id) return respondErr("target_id required");
         await supabaseAdmin.from("subscriptions").delete().eq("user_id", target_id).eq("amount", 0);
         const { data: remaining } = await supabaseAdmin.from("subscriptions").select("id").eq("user_id", target_id).eq("status", "active");
         if (!remaining?.length) {
-          await supabaseAdmin.from("profiles").update({ role: "guest", subscription_status: "none" }).eq("user_id", target_id);
+          const { error: revokeErr } = await supabaseAdmin
+            .from("profiles")
+            .update({ role: "guest", subscription_status: "none", updated_at: new Date().toISOString() })
+            .eq("user_id", target_id);
+          if (revokeErr) return respondErr(revokeErr.message, 500);
+          const revokeVerified = await verifyProfileRole(supabaseAdmin, target_id, "guest");
+          if (!revokeVerified.ok) return respondErr(revokeVerified.message, 500);
+          return respond({ role: revokeVerified.role });
         }
         return respond({});
       }
       case "force_approve_member": {
-        await supabaseAdmin.from("profiles").update({ role: "member", subscription_status: "active" }).eq("user_id", target_id);
-        return respond({});
+        if (!target_id) return respondErr("target_id required");
+        const { error: approveErr } = await supabaseAdmin
+          .from("profiles")
+          .update({ role: "member", subscription_status: "active", updated_at: new Date().toISOString() })
+          .eq("user_id", target_id);
+        if (approveErr) return respondErr(approveErr.message, 500);
+        const approveVerified = await verifyProfileRole(supabaseAdmin, target_id, "member");
+        if (!approveVerified.ok) return respondErr(approveVerified.message, 500);
+        return respond({ role: approveVerified.role });
       }
 
       // ---- Event Management ----

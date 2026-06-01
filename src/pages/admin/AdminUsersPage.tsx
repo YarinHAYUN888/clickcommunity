@@ -47,15 +47,20 @@ export default function AdminUsersPage() {
   const [ledger, setLedger] = useState<any[]>([]);
   const [capDraft, setCapDraft] = useState('');
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async (): Promise<any[]> => {
     setLoading(true);
     try {
       const data = await getAdminUsers(filter || undefined, search || undefined, page);
       setUsers(data.users);
       setTotal(data.total);
       setPages(data.pages);
-    } catch (e) { console.error(e); }
-    setLoading(false);
+      return data.users ?? [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    } finally {
+      setLoading(false);
+    }
   }, [filter, search, page]);
 
   useEffect(() => {
@@ -99,20 +104,29 @@ export default function AdminUsersPage() {
         toast.error(result.error);
         return;
       }
-      toast.success('הפעולה בוצעה בהצלחה ✓');
-      setConfirmAction(null);
-      await fetchUsers();
       const assignedRole =
         typeof result?.role === 'string'
-          ? result.role
-          : typeof details?.new_role === 'string'
-            ? details.new_role
-            : undefined;
-      if (options?.keepDrawerOpen && assignedRole) {
-        setSelectedUser((prev) =>
-          prev && prev.user_id === targetId ? { ...prev, role: assignedRole } : prev,
-        );
-      } else if (!options?.keepDrawerOpen) {
+          ? result.role === 'community_member'
+            ? 'member'
+            : result.role
+          : undefined;
+      if (action === 'update_user_role' && !assignedRole) {
+        toast.error('עדכון התפקיד לא אומת — נסה שוב');
+        return;
+      }
+      toast.success('הפעולה בוצעה בהצלחה ✓');
+      setConfirmAction(null);
+      const refreshedUsers = await fetchUsers();
+      if (options?.keepDrawerOpen) {
+        const fresh = refreshedUsers.find((u) => u.user_id === targetId);
+        if (fresh) {
+          setSelectedUser(fresh);
+        } else if (assignedRole) {
+          setSelectedUser((prev) =>
+            prev && prev.user_id === targetId ? { ...prev, role: assignedRole } : prev,
+          );
+        }
+      } else {
         setSelectedUser(null);
       }
     } catch (err) {
