@@ -83,6 +83,7 @@ export default function ProfileCard({
   };
 
   const photoSrc = !photoBroken ? (profile.photos?.[0] || profile.avatar_url || '') : '';
+  const avatarInitial = profile.first_name?.trim()?.charAt(0)?.toUpperCase() || 'U';
   const nicheLabel = lifeNicheLabel(profile.life_niche);
   const personalityLine =
     matchEnrichment?.match?.compatibility_reason ||
@@ -154,8 +155,10 @@ export default function ProfileCard({
               />
             </>
           ) : (
-            <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground text-4xl">
-              👤
+            <div className="w-full h-full bg-muted flex items-center justify-center" aria-label="Avatar ברירת מחדל">
+              <div className="h-24 w-24 rounded-full bg-background/80 border border-border flex items-center justify-center text-3xl font-semibold text-muted-foreground">
+                {avatarInitial}
+              </div>
             </div>
           )}
           {/* Vignette */}

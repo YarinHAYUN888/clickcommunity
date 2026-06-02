@@ -51,4 +51,26 @@ describe('clicksFeedBuilder', () => {
     expect(items.length).toBe(0);
     expect(report.excludedCounts.guest).toBe(1);
   });
+
+  it('includes approved active member even without photo and partial profile', () => {
+    const memberNoPhoto = mockProfile({
+      user_id: 'm1',
+      photos: [],
+      avatar_url: null,
+      bio: null,
+      interests: [],
+      profile_completed: false,
+      image_upload_status: 'pending',
+    });
+    const { items } = buildClicksFeedCandidates(viewer, [memberNoPhoto], new Set(), 'viewer-1');
+    expect(items.length).toBe(1);
+    expect(items[0].profile.user_id).toBe('m1');
+  });
+
+  it('excludes pending moderation even if role member', () => {
+    const pending = mockProfile({ user_id: 'm2', moderation_status: 'pending' });
+    const { items, report } = buildClicksFeedCandidates(viewer, [pending], new Set(), 'viewer-1');
+    expect(items.length).toBe(0);
+    expect(report.excludedCounts.not_approved).toBe(1);
+  });
 });

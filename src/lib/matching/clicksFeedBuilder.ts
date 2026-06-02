@@ -1,7 +1,7 @@
 import type { SupabaseProfile } from '@/hooks/useCurrentUser';
 import type { ClickFeedItem } from '@/hooks/useClicksFeed';
 import { areAdjacentNiches, isValidLifeNiche } from '@/data/lifeNiche';
-import { hasDisplayPhoto, hasRequiredOnboardingFields } from '@/lib/profileCompletion';
+import { hasDisplayPhoto } from '@/lib/profileCompletion';
 import { computeFeedPairScore } from '@/lib/matching/feedPairScore';
 
 export type FeedTier =
@@ -14,12 +14,10 @@ export type FeedTier =
 export type ExclusionReason =
   | 'self'
   | 'guest'
+  | 'not_member'
   | 'not_approved'
   | 'suspended'
   | 'not_active'
-  | 'incomplete_onboarding'
-  | 'no_first_name'
-  | 'no_photo'
   | 'swiped'
   | 'tier_no_match';
 
@@ -40,12 +38,10 @@ function sharedInterestsCount(a: string[], b: string[]): number {
 function isInPool(p: SupabaseProfile, swipeHidden: Set<string>, viewerId: string): ExclusionReason | null {
   if (p.user_id === viewerId) return 'self';
   if (p.role === 'guest') return 'guest';
+  if (p.role !== 'member') return 'not_member';
   if (p.moderation_status !== 'approved') return 'not_approved';
   if (p.suspended === true) return 'suspended';
   if (p.suitability_status && p.suitability_status !== 'active') return 'not_active';
-  if (!hasRequiredOnboardingFields(p) && p.profile_completed !== true) return 'incomplete_onboarding';
-  if (!p.first_name?.trim()) return 'no_first_name';
-  if (!hasDisplayPhoto(p)) return 'no_photo';
   if (swipeHidden.has(p.user_id)) return 'swiped';
   return null;
 }

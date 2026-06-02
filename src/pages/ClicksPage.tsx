@@ -20,7 +20,7 @@ export default function ClicksPage() {
   const { profile: myProfile, authId, role, loading: userLoading } = useCurrentUser();
   const isMember = role === 'member';
   /** חובה להשתמש ב-authId מהסשן — לא ב-myProfile.user_id: אחרת כשטעינת הפרופיל מתעכבת הפיד יוצא ריק לצמיתות */
-  const { items, loading: feedLoading, refresh } = useClicksFeed(authId, myProfile);
+  const { items, loading: feedLoading, error: feedError, refresh } = useClicksFeed(authId, myProfile);
   const matchByUserId = useCompatibilityLayer(authId, items);
   const loading = userLoading || feedLoading;
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
@@ -204,6 +204,22 @@ export default function ClicksPage() {
         <div className="max-w-[560px] mx-auto">
           {loading ? (
             <ClicksFeedSkeleton />
+          ) : feedError ? (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center py-20">
+              <div className="relative mx-auto mb-6 w-24 h-24 flex items-center justify-center">
+                <span className="absolute inset-0 rounded-full bg-gradient-to-br from-destructive/15 to-warning/15 animate-breathe" />
+                <Heart size={42} className="relative text-destructive" />
+              </div>
+              <p className="text-[24px] text-h1-premium text-foreground">לא הצלחנו לטעון קליקים</p>
+              <p className="text-[15px] text-muted-foreground mt-2 max-w-[320px] mx-auto leading-relaxed">{feedError}</p>
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                className="mt-5 rounded-full px-5 py-2.5 text-sm font-semibold bg-primary text-primary-foreground"
+              >
+                נסו שוב
+              </button>
+            </motion.div>
           ) : displayItems.length === 0 ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center py-20">
               <div className="relative mx-auto mb-6 w-24 h-24 flex items-center justify-center">
@@ -214,8 +230,7 @@ export default function ClicksPage() {
               </div>
               <p className="text-[24px] text-h1-premium text-foreground">עוד אין קליקים</p>
               <p className="text-[15px] text-muted-foreground mt-2 max-w-[300px] mx-auto leading-relaxed">
-                נחפש קודם אנשים באותה תחום חיים ועם עניינים משותפים, ואז נרחיב בהדרגה.
-                ודאו שיש לכם תמונה בפרופיל ושהפרופיל הושלם.
+                נחפש קודם אנשים באותה תחום חיים ועם עניינים משותפים, ואז נרחיב בהדרגה לכל חברי הקהילה הזמינים.
               </p>
             </motion.div>
           ) : (

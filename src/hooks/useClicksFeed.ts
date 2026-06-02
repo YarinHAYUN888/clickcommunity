@@ -18,6 +18,7 @@ export interface ClickFeedItem {
 export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile | null | undefined) {
   const [items, setItems] = useState<ClickFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const meRef = useRef(myProfile);
   meRef.current = myProfile;
@@ -49,10 +50,12 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
   const fetchProfiles = useCallback(async () => {
     if (!currentUserId) {
       setLoading(false);
+      setError(null);
       return;
     }
 
     setLoading(true);
+    setError(null);
 
     const [{ data, error }, swipeRes] = await Promise.all([
       supabase.from('profiles').select('*').neq('user_id', currentUserId),
@@ -62,12 +65,14 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     if (error) {
       console.error('useClicksFeed:', error.message);
       setItems([]);
+      setError('טעינת הקליקים נכשלה. אפשר לנסות שוב בעוד רגע.');
       setLoading(false);
       return;
     }
 
     if (!data) {
       setItems([]);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -88,11 +93,26 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
       currentUserId,
     );
 
+    if (import.meta.env.DEV) {
+      const excludedByEligibility = Object.entries(report.excludedCounts).reduce((acc, [reason, count]) => {
+        if (reason === 'tier_no_match') return acc;
+        return acc + (count ?? 0);
+      }, 0);
+      const eligibleAfterFilter = Math.max(0, data.length - excludedByEligibility);
+      console.info('[useClicksFeed] feed counts', {
+        rawProfiles: data.length,
+        afterRlsReturn: data.length,
+        afterEligibilityFilter: eligibleAfterFilter,
+        finalDisplayed: feedItems.length,
+      });
+    }
+
     logFeedExclusionSummary(currentUserId, report, {
       isSuperUser: !!meRef.current?.super_role?.trim(),
     });
 
     setItems(feedItems);
+    setError(null);
     setLoading(false);
   }, [currentUserId, mySignalsKey]);
 
@@ -100,7 +120,7 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     fetchProfiles();
   }, [fetchProfiles]);
 
-  return { items, loading, refresh: fetchProfiles };
+  return { items, loading, error, refresh: fetchProfiles };
 }
 
 /** Helper: get emoji for an interest label */
