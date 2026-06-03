@@ -1,3 +1,4 @@
+import { FunctionsHttpError } from '@supabase/functions-js';
 import { supabase } from '@/integrations/supabase/client';
 import { countRowsInCurrentJerusalemMonth } from '@/lib/jerusalemMonth';
 import { canViewEventParticipantStats } from '@/lib/eventPermissions';
@@ -348,12 +349,127 @@ export class SubscriptionValidationUnavailableError extends Error {
   }
 }
 
+export class EventRegistrationError extends Error {
+  readonly errorCode: string;
+  constructor(errorCode: string, message: string) {
+    super(errorCode);
+    this.name = 'EventRegistrationError';
+    this.errorCode = errorCode;
+    this.message = message;
+  }
+}
+
+export type EventRegistrationResult = {
+  ok: true;
+  status: 'registered' | 'waitlisted' | 'already_registered';
+  message: string;
+  registration_status: string;
+  waitlist_position: number | null;
+  entry_code: string | null;
+  success: true;
+};
+
+async function parseEdgeFunctionJsonBody(
+  data: unknown,
+  fnError: unknown,
+): Promise<Record<string, unknown> | null> {
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+
+  if (fnError instanceof FunctionsHttpError) {
+    const res = fnError.context as Response;
+    try {
+      const body = await res.json();
+      if (body && typeof body === 'object') return body as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const ctx = fnError as { context?: { body?: unknown } } | null;
+  const b = ctx?.context?.body;
+  if (b && typeof b === 'object') return b as Record<string, unknown>;
+  return null;
+}
+
 function extractFunctionErrorBody(data: unknown, fnError: unknown): Record<string, unknown> | null {
   if (data && typeof data === 'object') return data as Record<string, unknown>;
   const ctx = fnError as { context?: { body?: unknown } } | null;
   const b = ctx?.context?.body;
   if (b && typeof b === 'object') return b as Record<string, unknown>;
   return null;
+}
+
+/** Maps register-for-event body to result or typed errors (Hebrew messages). */
+export function mapEventRegistrationResponse(body: Record<string, unknown>): EventRegistrationResult {
+  if (body.ok === false) {
+    const code = String(body.error_code || body.error || 'server_error');
+    const message =
+      typeof body.message === 'string' && body.message.trim()
+        ? body.message
+        : mapEventRegistrationErrorMessage(code, body);
+
+    if (code === 'monthly_event_limit_reached') {
+      throw new MonthlyEventLimitError(Number(body.used) || 0, Number(body.cap) || DEFAULT_MONTHLY_EVENT_CAP);
+    }
+    if (code === 'subscription_required') {
+      throw new SubscriptionRequiredError();
+    }
+    if (code === 'subscription_validation_unavailable') {
+      throw new SubscriptionValidationUnavailableError();
+    }
+    throw new EventRegistrationError(code, message);
+  }
+
+  const status = String(body.status || body.registration_status || 'registered');
+  const registrationStatus =
+    status === 'waitlisted' ? 'waitlist' : status === 'already_registered' ? String(body.registration_status || 'registered') : status;
+
+  return {
+    ok: true,
+    status: status === 'waitlisted' ? 'waitlisted' : status === 'already_registered' ? 'already_registered' : 'registered',
+    message:
+      typeof body.message === 'string' && body.message.trim()
+        ? body.message
+        : status === 'waitlisted'
+          ? 'נוספת לרשימת המתנה'
+          : status === 'already_registered'
+            ? 'כבר נרשמת לאירוע'
+            : 'נרשמת לאירוע בהצלחה',
+    registration_status: registrationStatus,
+    waitlist_position:
+      typeof body.waitlist_position === 'number' ? body.waitlist_position : null,
+    entry_code: typeof body.entry_code === 'string' ? body.entry_code : null,
+    success: true,
+  };
+}
+
+export function mapEventRegistrationErrorMessage(
+  code: string,
+  body?: Record<string, unknown>,
+): string {
+  switch (code) {
+    case 'subscription_required':
+      return 'אירוע זה דורש מנוי פעיל';
+    case 'subscription_validation_unavailable':
+      return 'לא הצלחנו לאמת מנוי כרגע. נסו שוב בעוד רגע';
+    case 'monthly_event_limit_reached':
+      return typeof body?.message === 'string' ? body.message : 'הגעת למכסה החודשית לאירועים';
+    case 'user_not_allowed':
+      return 'אין אפשרות להירשם לאירוע זה';
+    case 'event_not_found':
+      return 'האירוע לא נמצא';
+    case 'invalid_request':
+      return 'בקשה לא תקינה';
+    case 'already_registered':
+      return 'כבר נרשמת לאירוע';
+    default:
+      return 'לא הצלחנו להשלים את ההרשמה. נסה/י שוב';
+  }
+}
+
+export function isOpaqueEdgeInvokeMessage(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes('non-2xx') || lower.includes('edge function returned');
 }
 
 export async function getMyMonthlyEventRegistrationUsage(): Promise<{ used: number; cap: number } | null> {
@@ -434,31 +550,29 @@ export async function cancelEventRegistration(eventId: string) {
   return data;
 }
 
-export async function registerForEvent(eventId: string) {
+export async function registerForEvent(eventId: string): Promise<EventRegistrationResult> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase.functions.invoke('register-for-event', {
     body: { event_id: eventId },
   });
-  const body = extractFunctionErrorBody(data, error);
-  if (body?.error === 'monthly_event_limit_reached') {
-    throw new MonthlyEventLimitError(Number(body.used) || 0, Number(body.cap) || DEFAULT_MONTHLY_EVENT_CAP);
+
+  const body = await parseEdgeFunctionJsonBody(data, error);
+
+  if (body) {
+    return mapEventRegistrationResponse(body);
   }
-  if (body?.error === 'subscription_required') {
-    throw new SubscriptionRequiredError();
-  }
-  if (body?.error === 'subscription_validation_unavailable') {
-    throw new SubscriptionValidationUnavailableError();
-  }
+
   if (error) {
-    const msg = typeof body?.message === 'string' ? body.message : error.message;
-    throw new Error(msg || 'Registration failed');
+    const raw = error.message || 'Registration failed';
+    if (isOpaqueEdgeInvokeMessage(raw)) {
+      throw new EventRegistrationError('server_error', mapEventRegistrationErrorMessage('server_error'));
+    }
+    throw new EventRegistrationError('server_error', raw);
   }
-  if (body && typeof body.error === 'string' && body.error !== undefined && !('success' in body && body.success === true)) {
-    throw new Error(String(body.message || body.error));
-  }
-  return data;
+
+  throw new EventRegistrationError('server_error', mapEventRegistrationErrorMessage('server_error'));
 }
 
 export async function submitVotes(

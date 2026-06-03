@@ -6,7 +6,7 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAdmin } from '@/contexts/AdminContext';
@@ -135,28 +135,28 @@ export default function EventDetailPage() {
     }
     setRegistering(true);
     try {
-      const result = await registerForEvent(eventId) as {
-        success?: boolean;
-        registration_status?: string;
-        waitlist_position?: number | null;
-        entry_code?: string | null;
-      };
-      if (result?.success) {
-        setRegistration({
-          id: '',
-          event_id: eventId,
-          user_id: authId,
-          status: result.registration_status,
-          waitlist_position: result.waitlist_position,
-          paid_amount: null,
-          payment_status: 'unpaid',
-          entry_code: result.entry_code || null,
-          created_at: '',
-        });
-        if (result.registration_status === 'registered') setShowSuccess(true);
-        else toast({ title: `ברשימת המתנה (מקום ${result.waitlist_position})` });
-        void getMyMonthlyEventRegistrationUsage().then(setMonthlyUsage);
+      const result = await registerForEvent(eventId);
+
+      setRegistration({
+        id: '',
+        event_id: eventId,
+        user_id: authId,
+        status: result.registration_status,
+        waitlist_position: result.waitlist_position,
+        paid_amount: null,
+        payment_status: 'unpaid',
+        entry_code: result.entry_code || null,
+        created_at: '',
+      });
+
+      if (result.status === 'already_registered') {
+        toast({ title: result.message });
+      } else if (result.registration_status === 'registered') {
+        setShowSuccess(true);
+      } else {
+        toast({ title: result.message || `ברשימת המתנה (מקום ${result.waitlist_position})` });
       }
+      void getMyMonthlyEventRegistrationUsage().then(setMonthlyUsage);
     } catch (err: unknown) {
       if (err instanceof MonthlyEventLimitError) {
         sonner.error(`ניצלת את מכסת האירועים לחודש (${err.cap}). נסו שוב בחודש הבא.`);
@@ -167,8 +167,14 @@ export default function EventDetailPage() {
         });
       } else if (err instanceof SubscriptionValidationUnavailableError) {
         sonner.error('לא הצלחנו לאמת מנוי כרגע. נסו שוב בעוד רגע.');
+      } else if (err instanceof EventRegistrationError) {
+        toast({ title: 'שגיאה', description: err.message, variant: 'destructive' });
       } else {
-        toast({ title: 'שגיאה', description: err instanceof Error ? err.message : 'נסו שוב', variant: 'destructive' });
+        toast({
+          title: 'שגיאה',
+          description: err instanceof Error ? err.message : 'לא הצלחנו להשלים את ההרשמה. נסה/י שוב',
+          variant: 'destructive',
+        });
       }
     }
     setRegistering(false);

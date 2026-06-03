@@ -39,6 +39,16 @@ supabase secrets set WEBHOOK_INTERNAL_SECRET=... N8N_WEBHOOK_SECRET=... OTP_WEBH
 supabase functions deploy issue-onboarding-otp verify-onboarding-otp send-registration-otp verify-registration-otp complete-registration update-profile get-profile-stats check-subscription-eligibility cancel-subscription create-referral referral-preview analyze-registration-suitability automation-dispatch compute-compatibility
 ```
 
+### Event registration (`register-for-event`)
+
+After changing structured registration responses (HTTP 200 + `ok` / `error_code`), deploy only this function:
+
+```bash
+npx supabase functions deploy register-for-event --project-ref lwprevqahebqenpzdvle
+```
+
+Post-deploy: register on an open event in prod, confirm Supabase Logs show `EVENT REGISTRATION REQUEST RECEIVED` and the UI never shows `Edge Function returned a non-2xx status code`.
+
 ### OTP payload contract (email)
 
 After changing `onboardingOtpCore` / `n8nOtpEnvelope`, redeploy at minimum:
