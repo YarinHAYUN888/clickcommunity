@@ -29,6 +29,8 @@ export type PostOtpRegistrationResult = {
   registrationCode: 'created' | 'already_exists';
   profileSyncFailed: boolean;
   photoUrls: string[];
+  failedSlots: number[];
+  partialFailure: boolean;
   imageUploadStatus: 'pending' | 'success' | 'failed';
   sessionEstablished: boolean;
   route: PostAuthRoute;
@@ -184,12 +186,16 @@ export async function runPostOtpRegistration(
 
   let profileSyncFailed = false;
   let photoUrls: string[] = [];
+  let failedSlots: number[] = [];
+  let partialFailure = false;
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
 
   try {
     const finalized = await finalizeOnboardingProfile(userId, draft, photoSources);
     profileSyncFailed = finalized.profileSyncFailed;
     photoUrls = finalized.photoUrls;
+    failedSlots = finalized.failedSlots;
+    partialFailure = finalized.partialFailure;
     imageUploadStatus = finalized.imageUploadStatus;
     logAuthCompletionStep(3, { userId, profileSyncFailed });
     logAuthCompletionStep(4, { imageUploadStatus, photoCount: photoUrls.length });
@@ -248,6 +254,8 @@ export async function runPostOtpRegistration(
     registrationCode,
     profileSyncFailed,
     photoUrls,
+    failedSlots,
+    partialFailure,
     imageUploadStatus,
     sessionEstablished: true,
     route,
@@ -261,7 +269,18 @@ export async function tryRecoverSessionAfterFailure(
   email: string,
   password: string,
   _registrationCode?: 'created' | 'already_exists',
-): Promise<{ recovered: true; userId: string; route: PostAuthRoute; profileSyncFailed: boolean } | { recovered: false }> {
+): Promise<
+  | {
+      recovered: true;
+      userId: string;
+      route: PostAuthRoute;
+      profileSyncFailed: boolean;
+      photoUrls: string[];
+      partialFailure: boolean;
+      imageUploadStatus: 'pending' | 'success' | 'failed';
+    }
+  | { recovered: false }
+> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -269,14 +288,29 @@ export async function tryRecoverSessionAfterFailure(
   if (session?.user?.id) {
     await ensureCommunityMemberDefaults(session.user.id);
     let profileSyncFailed = false;
+    let photoUrls: string[] = [];
+    let partialFailure = false;
+    let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
     try {
       const r = await finalizeOnboardingProfile(session.user.id, draft, photoSources);
       profileSyncFailed = r.profileSyncFailed;
+      photoUrls = r.photoUrls;
+      partialFailure = r.partialFailure;
+      imageUploadStatus = r.imageUploadStatus;
     } catch {
       profileSyncFailed = true;
+      imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
     }
     const { route } = await resolvePostAuthRedirect(session.user.id);
-    return { recovered: true, userId: session.user.id, route, profileSyncFailed };
+    return {
+      recovered: true,
+      userId: session.user.id,
+      route,
+      profileSyncFailed,
+      photoUrls,
+      partialFailure,
+      imageUploadStatus,
+    };
   }
 
   if (email && password) {
@@ -287,14 +321,29 @@ export async function tryRecoverSessionAfterFailure(
     if (!error && signInData.user?.id) {
       await ensureCommunityMemberDefaults(signInData.user.id);
       let profileSyncFailed = false;
+      let photoUrls: string[] = [];
+      let partialFailure = false;
+      let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
       try {
         const r = await finalizeOnboardingProfile(signInData.user.id, draft, photoSources);
         profileSyncFailed = r.profileSyncFailed;
+        photoUrls = r.photoUrls;
+        partialFailure = r.partialFailure;
+        imageUploadStatus = r.imageUploadStatus;
       } catch {
         profileSyncFailed = true;
+        imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
       }
       const { route } = await resolvePostAuthRedirect(signInData.user.id);
-      return { recovered: true, userId: signInData.user.id, route, profileSyncFailed };
+      return {
+        recovered: true,
+        userId: signInData.user.id,
+        route,
+        profileSyncFailed,
+        photoUrls,
+        partialFailure,
+        imageUploadStatus,
+      };
     }
   }
 

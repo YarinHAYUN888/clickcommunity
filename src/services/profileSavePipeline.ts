@@ -6,6 +6,8 @@ import {
   NEW_SIGNUP_PROFILE_DEFAULTS,
 } from '@/lib/profileCompletion';
 import {
+  ensureSessionReadyForStorage,
+  updateProfile,
   uploadOnboardingPhotosFromDataUrls,
   uploadPhotoSlot,
 } from '@/services/profile';
@@ -207,36 +209,44 @@ export async function saveProfileTextFromDraft(
   writeSaveProgress(userId, { textSaved: true, photoUrls: photoList, imageUploadStatus });
 }
 
-/** Persist uploaded photo URLs on profile (explicit step after Storage upload). */
+/** Persist uploaded photo URLs via update-profile Edge (same path as edit profile). */
 export async function persistProfilePhotoUrls(
   userId: string,
   photoUrls: string[],
 ): Promise<'success' | 'failed' | 'skipped'> {
   if (photoUrls.length === 0) return 'skipped';
 
-  const { error } = await supabase
-    .from('profiles')
-    .update({
-      photos: photoUrls,
-      avatar_url: photoUrls[0],
-      image_upload_status: 'success',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId);
+  try {
+    await updateProfile(userId, { photos: photoUrls });
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        image_upload_status: 'success',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
 
-  if (error) {
-    console.error('PROFILE IMAGE SAVE FAILED', { userId, message: error.message });
+    if (error) {
+      console.error('PROFILE IMAGE UPLOAD FAILED', { userId, stage: 'image_upload_status', message: error.message });
+      return 'failed';
+    }
+
+    console.log('PROFILE IMAGE URL SAVED TO PROFILE', { userId, count: photoUrls.length });
+    console.log('PROFILE IMAGE FINAL PROFILE UPDATE SUCCESS', { userId, count: photoUrls.length });
+    return 'success';
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error('PROFILE IMAGE UPLOAD FAILED', { userId, stage: 'update_profile_edge', message });
     return 'failed';
   }
-
-  console.log('PROFILE IMAGE URL SAVED', { userId, count: photoUrls.length, avatar_url: photoUrls[0] });
-  return 'success';
 }
 
 export type FinalizeOnboardingResult = {
   userId: string;
   profileSyncFailed: boolean;
   photoUrls: string[];
+  failedSlots: number[];
+  partialFailure: boolean;
   imageUploadStatus: 'pending' | 'success' | 'failed';
 };
 
@@ -250,37 +260,44 @@ export async function finalizeOnboardingProfile(
 ): Promise<FinalizeOnboardingResult> {
   console.log('onboarding start', { userId, photoSourceCount: photoSources.length });
   let photoUrls: string[] = [];
+  let failedSlots: number[] = [];
+  let partialFailure = false;
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
   let profileSyncFailed = false;
 
   await applyDefaultUserRole(userId);
   await ensureCommunityMemberDefaults(userId);
 
-  if (photoSources.length > 0) {
+  const validPhotoSources = photoSources.filter((s) => typeof s === 'string' && s.length > 0);
+
+  if (validPhotoSources.length > 0) {
     try {
-      photoUrls = await uploadOnboardingPhotosFromDataUrls(userId, photoSources);
-      imageUploadStatus = photoUrls.length > 0 ? 'success' : 'failed';
+      await ensureSessionReadyForStorage(userId);
+      const uploadResult = await uploadOnboardingPhotosFromDataUrls(userId, validPhotoSources);
+      photoUrls = uploadResult.photoUrls;
+      failedSlots = uploadResult.failedSlots;
+      partialFailure = uploadResult.partialFailure;
+      imageUploadStatus = partialFailure ? 'failed' : 'success';
     } catch (e) {
+      imageUploadStatus = 'failed';
       if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
-        imageUploadStatus = 'failed';
         console.error('[finalizeOnboardingProfile] all photos failed — text kept, status failed', e);
       } else {
-        console.warn('[finalizeOnboardingProfile] partial photo upload', e);
-        imageUploadStatus = 'failed';
+        console.error('[finalizeOnboardingProfile] photo upload failed', e);
       }
+      throw e;
     }
-
   }
 
   const computedImageStatus: 'pending' | 'success' | 'failed' =
-    photoSources.length === 0 ? 'pending' : imageUploadStatus;
+    validPhotoSources.length === 0 ? 'pending' : imageUploadStatus;
 
-  // Save profile only after upload stage settled and URLs were validated.
   try {
     console.log('profile save', {
       userId,
       imageUploadStatus: computedImageStatus,
       uploadedCount: photoUrls.length,
+      partialFailure,
     });
     await saveProfileTextFromDraft(userId, data, photoUrls, computedImageStatus, false);
   } catch (e) {
@@ -293,16 +310,21 @@ export async function finalizeOnboardingProfile(
     if (photoPersist === 'failed') {
       profileSyncFailed = true;
       imageUploadStatus = 'failed';
-    } else if (photoPersist === 'success') {
+    } else if (photoPersist === 'success' && !partialFailure) {
       imageUploadStatus = 'success';
     }
   }
 
   const finalImageStatus: 'pending' | 'success' | 'failed' =
-    photoSources.length === 0 ? 'pending' : imageUploadStatus;
+    validPhotoSources.length === 0 ? 'pending' : imageUploadStatus;
+
+  const photosFullySaved =
+    validPhotoSources.length === 0 ||
+    (photoUrls.length === validPhotoSources.length && finalImageStatus === 'success' && !partialFailure);
 
   const shouldMarkProfileCompleted =
     !profileSyncFailed &&
+    photosFullySaved &&
     hasRequiredOnboardingFields({
       first_name: data.firstName,
       date_of_birth: data.dateOfBirth
@@ -314,8 +336,7 @@ export async function finalizeOnboardingProfile(
       questionnaire_responses: data.questionnaireResponses,
       moderation_status: 'approved',
       profile_completed: false,
-    }) &&
-    (photoSources.length === 0 || (photoUrls.length > 0 && finalImageStatus === 'success'));
+    });
 
   if (shouldMarkProfileCompleted) {
     const { error: completeErr } = await supabase
@@ -326,8 +347,12 @@ export async function finalizeOnboardingProfile(
       console.error('[finalizeOnboardingProfile] profile_completed update failed', completeErr);
       profileSyncFailed = true;
     } else {
-      console.log('profile_completed update', { userId, profile_completed: true });
+      console.log('PROFILE IMAGE FINAL PROFILE UPDATE SUCCESS', { userId, profile_completed: true });
     }
+  }
+
+  if (partialFailure && !profileSyncFailed) {
+    profileSyncFailed = true;
   }
 
   writeSaveProgress(userId, {
@@ -335,7 +360,14 @@ export async function finalizeOnboardingProfile(
     photoUrls,
     imageUploadStatus: finalImageStatus,
   });
-  return { userId, profileSyncFailed, photoUrls, imageUploadStatus: finalImageStatus };
+  return {
+    userId,
+    profileSyncFailed,
+    photoUrls,
+    failedSlots,
+    partialFailure,
+    imageUploadStatus: finalImageStatus,
+  };
 }
 
 export { uploadPhotoSlot };

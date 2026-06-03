@@ -870,6 +870,23 @@ function InterestsStep({ data, updateData, onNext }: { data: any; updateData: an
 }
 
 // ---- STEP 6: Verify ----
+function onboardingPhotosIncomplete(
+  expectedCount: number,
+  result: {
+    photoUrls: string[];
+    partialFailure?: boolean;
+    imageUploadStatus: 'pending' | 'success' | 'failed';
+  },
+): boolean {
+  if (expectedCount === 0) return false;
+  return (
+    result.photoUrls.length === 0 ||
+    result.partialFailure === true ||
+    result.photoUrls.length < expectedCount ||
+    result.imageUploadStatus !== 'success'
+  );
+}
+
 function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
   const navigate = useNavigate();
   const { voiceIntroDraftRef, photosDraftRef, getPassword } = useOnboarding();
@@ -884,6 +901,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [postAuthBusy, setPostAuthBusy] = useState(false);
+  const otpFinalizeInFlightRef = useRef(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [sendError, setSendError] = useState('');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -915,27 +933,27 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (otpFinalizeInFlightRef.current || postAuthBusy || verifying) return;
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session?.user || cancelled) return;
 
-      try {
-        const saved = localStorage.getItem('clicks_onboarding');
-        if (saved) {
-          const parsed = JSON.parse(saved) as Record<string, unknown>;
-          const draft = onboardingDataToDraft(parsed);
-          const storedPhotos = (parsed.photos as string[] | undefined)?.filter(
-            (u) => typeof u === 'string' && u.length > 0,
-          );
-          const photoSources =
-            photosDraftRef.current.length > 0
-              ? photosDraftRef.current
-              : storedPhotos ?? [];
-          await finalizeOnboardingProfile(session.user.id, draft, photoSources);
+      const photoSources = photosDraftRef.current.filter((u) => typeof u === 'string' && u.length > 0);
+
+      if (photoSources.length > 0) {
+        try {
+          const saved = localStorage.getItem('clicks_onboarding');
+          if (saved) {
+            const parsed = JSON.parse(saved) as Record<string, unknown>;
+            const draft = onboardingDataToDraft(parsed);
+            await finalizeOnboardingProfile(session.user.id, draft, photoSources);
+          }
+        } catch (e) {
+          console.warn('[VerifyStep] session restore finalize skipped', e);
+          return;
         }
-      } catch (e) {
-        console.warn('[VerifyStep] session restore finalize skipped', e);
       }
 
       const { route } = await resolvePostAuthRedirect(session.user.id);
@@ -946,7 +964,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     return () => {
       cancelled = true;
     };
-  }, [navigate, photosDraftRef]);
+  }, [navigate, photosDraftRef, postAuthBusy, verifying]);
 
   const phoneClean = (() => {
     const fromData = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
@@ -1123,6 +1141,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
       logOnboardingStep(3, { method });
       setPostAuthBusy(true);
+      otpFinalizeInFlightRef.current = true;
 
       const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
 
@@ -1178,11 +1197,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         setPostAuthBusy(false);
         return;
       }
-      if (
-        onboardingPhotos.length > 0 &&
-        result.photoUrls.length === 0 &&
-        result.imageUploadStatus !== 'success'
-      ) {
+      if (onboardingPhotosIncomplete(onboardingPhotos.length, result)) {
         toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
         setPostAuthBusy(false);
         return;
@@ -1198,22 +1213,11 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       setPostAuthBusy(false);
       console.error('Verify exception:', e);
 
+      let onboardingPhotos: string[] = [];
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.user?.id) {
-          const { route } = await resolvePostAuthRedirect(session.user.id);
-          toast.warning(getHebrewOnboardingMessage('auth_completion_sync_pending'));
-          if (route === '/clicks' || route === '/pending-review') {
-            notifyProfileUpdated(session.user.id);
-          }
-          navigate(route, { replace: true });
-          clearData();
-          return;
-        }
+        const { password, email, onboardingPhotos: photos, draft } = buildPostOtpInputs();
+        onboardingPhotos = photos;
 
-        const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
         const recovery = await tryRecoverSessionAfterFailure(
           draft,
           onboardingPhotos,
@@ -1222,16 +1226,39 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
           lastRegistrationCodeRef.current,
         );
         if (recovery.recovered) {
+          if (onboardingPhotosIncomplete(onboardingPhotos.length, recovery)) {
+            toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
+            return;
+          }
           clearPendingOtp();
           voiceIntroDraftRef.current = null;
           photosDraftRef.current = [];
           if (recovery.profileSyncFailed) {
             toast.warning(getHebrewOnboardingMessage('onboarding_finalize_partial'));
+            return;
           }
           if (recovery.route === '/clicks' || recovery.route === '/pending-review') {
             notifyProfileUpdated(recovery.userId);
           }
           navigate(recovery.route, { replace: true });
+          clearData();
+          return;
+        }
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.id && onboardingPhotos.length > 0) {
+          toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
+          return;
+        }
+        if (session?.user?.id && onboardingPhotos.length === 0 && !shouldShowRegistrationFailed(true)) {
+          toast.warning(getHebrewOnboardingMessage('auth_completion_sync_pending'));
+          const { route } = await resolvePostAuthRedirect(session.user.id);
+          if (route === '/clicks' || route === '/pending-review') {
+            notifyProfileUpdated(session.user.id);
+          }
+          navigate(route, { replace: true });
           clearData();
           return;
         }
@@ -1242,6 +1269,10 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      if (session?.user && onboardingPhotos.length > 0) {
+        toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
+        return;
+      }
       if (session?.user && !shouldShowRegistrationFailed(true)) {
         toast.warning(getHebrewOnboardingMessage('auth_completion_sync_pending'));
         const { route } = await resolvePostAuthRedirect(session.user.id);
@@ -1260,6 +1291,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       }
       setVerifyError(getHebrewOnboardingMessage(mappedCode));
     } finally {
+      otpFinalizeInFlightRef.current = false;
       setVerifying(false);
     }
   };

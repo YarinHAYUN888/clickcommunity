@@ -12,6 +12,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Wait until the Supabase client has a JWT for Storage uploads (onboarding post-OTP). */
+export async function ensureSessionReadyForStorage(userId: string, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.user?.id === userId && session.access_token) return;
+    await sleep(200);
+  }
+  console.error('PROFILE IMAGE UPLOAD FAILED', { userId, reason: 'session_not_ready' });
+  throw new Error('session_not_ready_for_storage');
+}
+
+export type OnboardingPhotoUploadResult = {
+  photoUrls: string[];
+  failedSlots: number[];
+  partialFailure: boolean;
+};
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`timeout:${label}`)), ms);
@@ -320,7 +340,10 @@ export async function verifyPublicPhotoUrl(url: string, retries = 3): Promise<bo
 }
 
 /** Upload onboarding image sources: data URLs become files in Storage; existing project public URLs pass through. */
-export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources: string[]): Promise<string[]> {
+export async function uploadOnboardingPhotosFromDataUrls(
+  userId: string,
+  sources: string[],
+): Promise<OnboardingPhotoUploadResult> {
   const validSources = sources
     .filter((s) => typeof s === 'string' && s.length > 0)
     .slice(0, MAX_ONBOARDING_UPLOADS);
@@ -334,29 +357,44 @@ export async function uploadOnboardingPhotosFromDataUrls(userId: string, sources
     validSources.map((source, i) => uploadPhotoSlot(userId, source, i)),
   );
 
-  const out: string[] = [];
+  const photoUrls: string[] = [];
   const errors: { index: number; message: string }[] = [];
 
   settled.forEach((entry, i) => {
     if (entry.status === 'fulfilled') {
       const result = entry.value;
-      if (result.url) out.push(result.url);
+      if (result.url) photoUrls.push(result.url);
       else if (result.error) errors.push({ index: i, message: result.error });
       return;
     }
     errors.push({ index: i, message: entry.reason instanceof Error ? entry.reason.message : String(entry.reason) });
   });
 
+  const failedSlots = errors.map((e) => e.index);
+  const partialFailure = validSources.length > 0 && photoUrls.length < validSources.length;
+
   for (const e of errors) {
     console.warn('[uploadOnboardingPhotosFromDataUrls] slot failed', { userId, index: e.index, message: e.message });
   }
 
-  console.info('[uploadOnboardingPhotosFromDataUrls] done', { userId, uploadedCount: out.length });
-  if (validSources.length > 0 && out.length === 0) {
+  if (validSources.length > 0 && photoUrls.length === 0) {
     const detail = errors.map((e) => `#${e.index}: ${e.message}`).join('; ');
+    console.error('PROFILE IMAGE UPLOAD FAILED', { userId, failedSlots, detail });
     throw new Error(detail ? `photo_upload_failed:${detail}` : 'photo_upload_failed');
   }
-  return out;
+
+  if (photoUrls.length > 0) {
+    console.log('PROFILE IMAGE UPLOAD SUCCESS', {
+      userId,
+      uploadedCount: photoUrls.length,
+      failedCount: failedSlots.length,
+    });
+  }
+  if (partialFailure) {
+    console.error('PROFILE IMAGE UPLOAD FAILED', { userId, failedSlots, uploadedCount: photoUrls.length });
+  }
+
+  return { photoUrls, failedSlots, partialFailure };
 }
 
 export async function uploadProfilePhoto(userId: string, file: File, index: number) {

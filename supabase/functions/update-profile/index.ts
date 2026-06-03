@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "too many photos" }, 400);
       }
       updates.photos = urls;
+      updates.avatar_url = urls.length > 0 ? urls[0] : null;
     }
     if (interests !== undefined) {
       if (Array.isArray(interests) && interests.length > 0 && interests.length < 5) {
