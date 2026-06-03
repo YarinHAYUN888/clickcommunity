@@ -85,7 +85,13 @@ export default function EventCard({ event, index }: EventCardProps) {
     >
       <GlassCard
         className={`overflow-hidden ${isPast ? 'opacity-70' : ''}`}
-        onClick={() => navigate(`/events/${event.id}`)}
+        onClick={() => {
+          if (import.meta.env.DEV) {
+            console.log('EVENT CARD CLICKED');
+            console.log('EVENT ID RECEIVED', event.id);
+          }
+          navigate(`/events/${event.id}`);
+        }}
       >
         {/* Cover Image */}
         <div className="relative h-44 md:h-56 overflow-hidden" style={{ boxShadow: '0 12px 32px rgba(124,58,237,0.18)' }}>

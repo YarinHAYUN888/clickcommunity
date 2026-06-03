@@ -143,14 +143,76 @@ export async function getCalendarEvents(
   }));
 }
 
-export async function getEventById(eventId: string): Promise<EventRow | null> {
+function logEventDev(message: string, detail?: Record<string, unknown>) {
+  if (import.meta.env.DEV) {
+    if (detail) console.log(message, detail);
+    else console.log(message);
+  }
+}
+
+export async function getEventById(
+  eventId: string,
+  isShadowUser = false,
+): Promise<EventRow | null> {
+  const trimmed = eventId?.trim();
+  if (!trimmed) {
+    logEventDev('EVENT NOT FOUND', { reason: 'empty_event_id' });
+    return null;
+  }
+
   const { data, error } = await supabase
     .from('events')
     .select('*')
-    .eq('id', eventId)
-    .single();
-  if (error) return null;
-  return data as EventRow;
+    .eq('id', trimmed)
+    .maybeSingle();
+
+  if (error) {
+    logEventDev('EVENT NOT FOUND', {
+      eventId: trimmed,
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  if (!data) {
+    logEventDev('EVENT NOT FOUND', { eventId: trimmed, code: 'PGRST116' });
+    return null;
+  }
+
+  const [visible] = await filterEventsByHostIsolation([data as EventRow], isShadowUser);
+  if (!visible) {
+    logEventDev('EVENT NOT FOUND', { eventId: trimmed, reason: 'host_isolation' });
+    return null;
+  }
+
+  logEventDev('EVENT FOUND', { eventId: trimmed });
+  return visible;
+}
+
+/** Maps Promise.allSettled results for event detail secondary loads (stats, attendees, photos, registration). */
+export function applyEventDetailSecondarySettled(
+  settled: [
+    PromiseSettledResult<EventStats | null>,
+    PromiseSettledResult<Awaited<ReturnType<typeof getEventAttendees>>>,
+    PromiseSettledResult<Awaited<ReturnType<typeof getEventPhotos>>>,
+    PromiseSettledResult<EventRegistration | null>,
+  ],
+): {
+  stats: EventStats | null;
+  attendees: Awaited<ReturnType<typeof getEventAttendees>>;
+  photos: Awaited<ReturnType<typeof getEventPhotos>>;
+  registration: EventRegistration | null;
+} {
+  const pick = <T,>(r: PromiseSettledResult<T>, fallback: T): T =>
+    r.status === 'fulfilled' ? r.value : fallback;
+
+  return {
+    stats: pick(settled[0], null),
+    attendees: pick(settled[1], []),
+    photos: pick(settled[2], []),
+    registration: pick(settled[3], null),
+  };
 }
 
 /** Returns null for non–super users (no client-side aggregate stats). */

@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import GlassCard from '@/components/clicks/GlassCard';
 import { getEventById, getVotableAttendees, submitVotes, EventRow } from '@/services/events';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useUserMode } from '@/hooks/useUserMode';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 
@@ -17,6 +18,7 @@ export default function EventVotePage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { authId } = useCurrentUser();
+  const { isShadowUser } = useUserMode();
   const [event, setEvent] = useState<EventRow | null>(null);
   const [attendees, setAttendees] = useState<any[]>([]);
   const [votes, setVotes] = useState<Record<string, VoteEntry['vote']>>({});
@@ -25,15 +27,33 @@ export default function EventVotePage() {
 
   useEffect(() => {
     if (!eventId || !authId) return;
-    Promise.all([
-      getEventById(eventId),
-      getVotableAttendees(eventId, authId),
-    ]).then(([ev, att]) => {
+
+    let cancelled = false;
+    setLoading(true);
+
+    void (async () => {
+      const ev = await getEventById(eventId, isShadowUser);
+      if (cancelled) return;
+
       setEvent(ev);
-      setAttendees(att);
+      if (!ev) {
+        setLoading(false);
+        return;
+      }
+
+      const attResult = await Promise.allSettled([getVotableAttendees(eventId, authId)]);
+      if (cancelled) return;
+
+      setAttendees(
+        attResult[0].status === 'fulfilled' ? attResult[0].value : [],
+      );
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [eventId, authId]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, authId, isShadowUser]);
 
   const votedCount = Object.keys(votes).length;
 

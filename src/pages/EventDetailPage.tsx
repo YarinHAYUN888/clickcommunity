@@ -6,9 +6,10 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError, applyEventDetailSecondarySettled } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useUserMode } from '@/hooks/useUserMode';
 import { useAdmin } from '@/contexts/AdminContext';
 import { canViewEventParticipantStats } from '@/lib/eventPermissions';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,6 +21,7 @@ export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { authId, role } = useCurrentUser();
+  const { isShadowUser } = useUserMode();
   const { superRole } = useAdmin();
   const canViewStats = canViewEventParticipantStats(superRole);
   const [event, setEvent] = useState<EventRow | null>(null);
@@ -40,21 +42,47 @@ export default function EventDetailPage() {
 
   useEffect(() => {
     if (!eventId) return;
-    Promise.all([
-      getEventById(eventId),
-      canViewStats ? getEventStats(eventId) : Promise.resolve(null),
-      getEventAttendees(eventId),
-      getEventPhotos(eventId),
-      authId ? getUserRegistration(eventId, authId) : Promise.resolve(null),
-    ]).then(([ev, st, att, ph, reg]) => {
+
+    let cancelled = false;
+    setLoading(true);
+
+    if (import.meta.env.DEV) {
+      console.log('EVENT DETAILS QUERY START', eventId);
+    }
+
+    void (async () => {
+      const ev = await getEventById(eventId, isShadowUser);
+      if (cancelled) return;
+
       setEvent(ev);
+      if (!ev) {
+        setLoading(false);
+        return;
+      }
+
+      const settled = await Promise.allSettled([
+        canViewStats ? getEventStats(eventId) : Promise.resolve(null),
+        getEventAttendees(eventId),
+        getEventPhotos(eventId),
+        authId ? getUserRegistration(eventId, authId) : Promise.resolve(null),
+      ]);
+
+      if (cancelled) return;
+
+      const { stats: st, attendees: att, photos: ph, registration: reg } =
+        applyEventDetailSecondarySettled(settled);
+
       setStats(st);
       setAttendees(att);
       setPhotos(ph);
       setRegistration(reg);
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [eventId, authId, canViewStats]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, authId, canViewStats, isShadowUser]);
 
   useEffect(() => {
     if (role !== 'member' || !authId) {
