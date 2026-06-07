@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, CalendarCheck, CalendarDays } from 'lucide-react';
 import EventCard from '@/components/clicks/EventCard';
 import EventsCalendarView from '@/components/clicks/EventsCalendarView';
-import { getUpcomingEvents, getPastEvents, EventRow } from '@/services/events';
+import { getUpcomingEventsRanked, getPastEventsRanked, RankedEventRow } from '@/services/events';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useUserMode } from '@/hooks/useUserMode';
@@ -18,7 +18,7 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function EventsPage() {
   const [tab, setTab] = useState<TabId>('upcoming');
-  const [events, setEvents] = useState<EventRow[]>([]);
+  const [events, setEvents] = useState<RankedEventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { authId } = useCurrentUser();
   const { isShadowUser } = useUserMode();
@@ -32,13 +32,13 @@ export default function EventsPage() {
     setLoading(true);
     const fetch =
       tab === 'upcoming'
-        ? () => getUpcomingEvents(isShadowUser)
-        : () => getPastEvents(isShadowUser);
+        ? () => getUpcomingEventsRanked(isShadowUser, authId || undefined)
+        : () => getPastEventsRanked(isShadowUser, authId || undefined);
     fetch()
       .then(setEvents)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [tab, isShadowUser]);
+  }, [tab, isShadowUser, authId]);
 
   return (
     <div className="min-h-screen pb-4">
@@ -145,7 +145,12 @@ export default function EventsPage() {
               className="space-y-6"
             >
               {events.map((event, index) => (
-                <EventCard key={event.id} event={event} index={index} />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  index={index}
+                  mutualMatchCount={event.mutual_match_count}
+                />
               ))}
             </motion.div>
           )}

@@ -102,6 +102,8 @@ export async function getPastEvents(isShadowUser = false): Promise<EventRow[]> {
 
 export interface CalendarEvent extends EventRow {
   is_mine: boolean;
+  mutual_match_count?: number;
+  click_score?: number;
 }
 
 /**
@@ -127,6 +129,10 @@ export async function getCalendarEvents(
 
   const filtered = await filterEventsByHostIsolation(events as EventRow[], isShadowUser);
 
+  const ranked = currentUserId
+    ? await rankEventsForViewer(filtered, currentUserId)
+    : filtered;
+
   let myEventIds = new Set<string>();
   if (currentUserId) {
     const { data: regs } = await supabase
@@ -137,10 +143,157 @@ export async function getCalendarEvents(
     if (regs) myEventIds = new Set(regs.map(r => r.event_id));
   }
 
-  return filtered.map(e => ({
+  return ranked.map(e => ({
     ...e,
     is_mine: myEventIds.has(e.id),
   }));
+}
+
+export const EVENT_CLICK_COMPAT_THRESHOLD = 40;
+
+export type RankedEventRow = EventRow & {
+  mutual_match_count?: number;
+  click_score?: number;
+};
+
+type ProfileSignals = { interests: string[] | null; region: string | null };
+
+/** Jaccard interest overlap + region bonus (same as event attendee scoring). */
+export function computeAttendeeCompatScore(viewer: ProfileSignals, attendee: ProfileSignals): number {
+  const myInterests = viewer.interests || [];
+  const theirInterests = attendee.interests || [];
+  const shared = myInterests.filter((i) => theirInterests.includes(i));
+  const totalUnique = new Set([...myInterests, ...theirInterests]).size;
+  const jaccard = totalUnique > 0 ? Math.round((shared.length / totalUnique) * 100) : 0;
+  const sameRegion =
+    !!viewer.region && !!attendee.region && viewer.region === attendee.region;
+  return Math.min(100, jaccard + (sameRegion ? 15 : 0));
+}
+
+export function sortEventsByMatchPriority(
+  events: EventRow[],
+  scoresByEventId: Map<string, { mutual_score: number; click_score: number }>,
+): RankedEventRow[] {
+  return [...events]
+    .sort((a, b) => {
+      const sa = scoresByEventId.get(a.id) ?? { mutual_score: 0, click_score: 0 };
+      const sb = scoresByEventId.get(b.id) ?? { mutual_score: 0, click_score: 0 };
+      if (sb.mutual_score !== sa.mutual_score) return sb.mutual_score - sa.mutual_score;
+      if (sb.click_score !== sa.click_score) return sb.click_score - sa.click_score;
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.time || '').localeCompare(b.time || '');
+    })
+    .map((e) => {
+      const scores = scoresByEventId.get(e.id);
+      return {
+        ...e,
+        mutual_match_count: scores?.mutual_score ?? 0,
+        click_score: scores?.click_score ?? 0,
+      };
+    });
+}
+
+export async function rankEventsForViewer(
+  events: EventRow[],
+  viewerId: string | undefined,
+): Promise<RankedEventRow[]> {
+  if (!viewerId || events.length === 0) return events;
+
+  const eventIds = events.map((e) => e.id);
+  const { data: regs, error: regErr } = await supabase
+    .from('event_registrations')
+    .select('event_id, user_id')
+    .in('event_id', eventIds)
+    .in('status', ['registered', 'approved']);
+
+  if (regErr) {
+    console.warn('rankEventsForViewer:', regErr.message);
+    return events;
+  }
+
+  const attendeesByEvent = new Map<string, string[]>();
+  const allAttendeeIds = new Set<string>();
+  for (const row of regs || []) {
+    if (row.user_id === viewerId) continue;
+    allAttendeeIds.add(row.user_id);
+    const list = attendeesByEvent.get(row.event_id) || [];
+    list.push(row.user_id);
+    attendeesByEvent.set(row.event_id, list);
+  }
+
+  if (allAttendeeIds.size === 0) return events;
+
+  const attendeeIdList = [...allAttendeeIds];
+  const [{ data: viewerProfile }, { data: attendeeProfiles }, { data: myLikes }, { data: likesToMe }] =
+    await Promise.all([
+      supabase.from('profiles').select('interests, region').eq('user_id', viewerId).maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('user_id, interests, region')
+        .in('user_id', attendeeIdList),
+      supabase
+        .from('profile_swipes')
+        .select('to_user_id, action')
+        .eq('from_user_id', viewerId)
+        .in('to_user_id', attendeeIdList)
+        .in('action', ['like', 'super_like']),
+      supabase
+        .from('profile_swipes')
+        .select('from_user_id, action')
+        .eq('to_user_id', viewerId)
+        .in('from_user_id', attendeeIdList)
+        .in('action', ['like', 'super_like']),
+    ]);
+
+  const viewerSignals: ProfileSignals = {
+    interests: (viewerProfile?.interests as string[] | null) ?? null,
+    region: viewerProfile?.region ?? null,
+  };
+
+  const profileById = new Map<string, ProfileSignals>();
+  for (const p of attendeeProfiles || []) {
+    profileById.set(p.user_id, {
+      interests: (p.interests as string[] | null) ?? null,
+      region: p.region ?? null,
+    });
+  }
+
+  const iLiked = new Set((myLikes || []).map((r) => r.to_user_id));
+  const likedMe = new Set((likesToMe || []).map((r) => r.from_user_id));
+
+  const scoresByEventId = new Map<string, { mutual_score: number; click_score: number }>();
+  for (const eventId of eventIds) {
+    const attendeeIds = attendeesByEvent.get(eventId) || [];
+    let mutual_score = 0;
+    let click_score = 0;
+    for (const aid of attendeeIds) {
+      if (iLiked.has(aid) && likedMe.has(aid)) mutual_score += 1;
+      const signals = profileById.get(aid);
+      if (!signals) continue;
+      const compat = computeAttendeeCompatScore(viewerSignals, signals);
+      if (compat >= EVENT_CLICK_COMPAT_THRESHOLD) click_score += 1;
+    }
+    scoresByEventId.set(eventId, { mutual_score, click_score });
+  }
+
+  return sortEventsByMatchPriority(events, scoresByEventId);
+}
+
+export async function getUpcomingEventsRanked(
+  isShadowUser = false,
+  viewerId?: string,
+): Promise<RankedEventRow[]> {
+  const events = await getUpcomingEvents(isShadowUser);
+  return rankEventsForViewer(events, viewerId);
+}
+
+export async function getPastEventsRanked(
+  isShadowUser = false,
+  viewerId?: string,
+): Promise<RankedEventRow[]> {
+  const events = await getPastEvents(isShadowUser);
+  return rankEventsForViewer(events, viewerId);
 }
 
 function logEventDev(message: string, detail?: Record<string, unknown>) {
@@ -563,6 +716,19 @@ export async function getMyMonthlyEventRegistrationUsage(): Promise<{ used: numb
   }
   const used = countRowsInCurrentJerusalemMonth(rows || []);
   return { used, cap: DEFAULT_MONTHLY_EVENT_CAP };
+}
+
+export async function getMyEventVotesForEvent(
+  eventId: string,
+  voterId: string,
+): Promise<{ votee_id: string; vote: string }[]> {
+  const { data, error } = await supabase
+    .from('event_votes')
+    .select('votee_id, vote')
+    .eq('event_id', eventId)
+    .eq('voter_id', voterId);
+  if (error) throw error;
+  return data || [];
 }
 
 export async function getVotableAttendees(eventId: string, voterId: string) {

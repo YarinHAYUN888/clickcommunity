@@ -35,13 +35,27 @@ function sharedInterestsCount(a: string[], b: string[]): number {
   return a.filter((i) => B.has(i)).length;
 }
 
-function isInPool(p: SupabaseProfile, swipeHidden: Set<string>, viewerId: string): ExclusionReason | null {
+export function isShadowProfile(p: Pick<SupabaseProfile, 'suitability_status' | 'is_shadow'>): boolean {
+  return p.suitability_status === 'shadow' && !!p.is_shadow;
+}
+
+function isInPool(
+  p: SupabaseProfile,
+  swipeHidden: Set<string>,
+  viewerId: string,
+  viewerIsShadow: boolean,
+): ExclusionReason | null {
   if (p.user_id === viewerId) return 'self';
   if (p.role === 'guest') return 'guest';
   if (p.role !== 'member') return 'not_member';
   if (p.moderation_status !== 'approved') return 'not_approved';
   if (p.suspended === true) return 'suspended';
-  if (p.suitability_status && p.suitability_status !== 'active') return 'not_active';
+  if (viewerIsShadow) {
+    if (!isShadowProfile(p)) return 'not_active';
+  } else {
+    if (p.suitability_status && p.suitability_status !== 'active') return 'not_active';
+    if (isShadowProfile(p)) return 'not_active';
+  }
   if (swipeHidden.has(p.user_id)) return 'swiped';
   return null;
 }
@@ -106,9 +120,11 @@ export function buildClicksFeedCandidates(
     report.excludedCounts[r] = (report.excludedCounts[r] ?? 0) + 1;
   };
 
+  const viewerIsShadow = viewer ? isShadowProfile(viewer) : false;
+
   const pool: SupabaseProfile[] = [];
   for (const p of candidates) {
-    const reason = isInPool(p, swipeHidden, viewerId);
+    const reason = isInPool(p, swipeHidden, viewerId, viewerIsShadow);
     if (reason) bump(reason);
     else pool.push(p);
   }

@@ -70,9 +70,38 @@ Deno.serve(async (req) => {
       }
     };
     const sanitizeEventDetails = (raw: Record<string, unknown>) => {
-      const next = { ...raw };
+      const allowed = [
+        "name",
+        "description",
+        "cover_image_url",
+        "date",
+        "time",
+        "location_name",
+        "location_address",
+        "location_url",
+        "max_capacity",
+        "reserved_new_spots",
+        "gender_balance_target",
+        "requires_subscription",
+        "status",
+        "is_past_voting_open",
+        "host_id",
+      ] as const;
+      const next: Record<string, unknown> = {};
+      for (const key of allowed) {
+        if (key in raw) next[key] = raw[key];
+      }
       if ("requires_subscription" in next) {
         next.requires_subscription = next.requires_subscription === true;
+      }
+      if ("is_past_voting_open" in next) {
+        next.is_past_voting_open = next.is_past_voting_open === true;
+      }
+      if ("status" in next && typeof next.status === "string") {
+        const s = next.status.trim();
+        if (!["open", "almost_full", "full", "past", "cancelled"].includes(s)) {
+          delete next.status;
+        }
       }
       return next;
     };
@@ -229,7 +258,11 @@ Deno.serve(async (req) => {
       // ---- Event Management ----
       case "create_event": {
         const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>);
-        const { data: ev, error } = await supabaseAdmin.from("events").insert({ ...safeDetails, created_by: user.id }).select().single();
+        const { data: ev, error } = await supabaseAdmin.from("events").insert({
+          ...safeDetails,
+          status: safeDetails.status ?? "open",
+          created_by: user.id,
+        }).select().single();
         if (error) return respondErr(error.message);
         return respond({ event: ev });
       }

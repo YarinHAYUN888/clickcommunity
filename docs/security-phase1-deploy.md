@@ -49,6 +49,16 @@ npx supabase functions deploy register-for-event --project-ref lwprevqahebqenpzd
 
 Post-deploy: register on an open event in prod, confirm Supabase Logs show `EVENT REGISTRATION REQUEST RECEIVED` and the UI never shows `Edge Function returned a non-2xx status code`.
 
+### Clicks / Events / Matching flow
+
+After shadow feed, post-event votes, admin event hardening, or profile reception stats changes:
+
+```bash
+npx supabase functions deploy get-profile-reception-stats submit-votes register-for-event admin-action compute-compatibility --project-ref lwprevqahebqenpzdvle
+```
+
+Post-deploy QA: admin user review shows like count; past event with voting open allows binary vote; new events have `status=open`; event list ranks by mutual matches without hiding events.
+
 ### OTP payload contract (email)
 
 After changing `onboardingOtpCore` / `n8nOtpEnvelope`, redeploy at minimum:

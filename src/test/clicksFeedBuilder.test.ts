@@ -73,4 +73,31 @@ describe('clicksFeedBuilder', () => {
     expect(items.length).toBe(0);
     expect(report.excludedCounts.not_approved).toBe(1);
   });
+
+  it('includes shadow members for shadow viewer', () => {
+    const shadowViewer = mockProfile({
+      user_id: 'shadow-viewer',
+      suitability_status: 'shadow',
+      is_shadow: true,
+    });
+    const shadowCandidate = mockProfile({
+      user_id: 'shadow-1',
+      suitability_status: 'shadow',
+      is_shadow: true,
+    });
+    const { items } = buildClicksFeedCandidates(shadowViewer, [shadowCandidate], new Set(), 'shadow-viewer');
+    expect(items.length).toBe(1);
+    expect(items[0].profile.user_id).toBe('shadow-1');
+  });
+
+  it('excludes shadow candidates for active viewer', () => {
+    const shadowCandidate = mockProfile({
+      user_id: 'shadow-1',
+      suitability_status: 'shadow',
+      is_shadow: true,
+    });
+    const { items, report } = buildClicksFeedCandidates(viewer, [shadowCandidate], new Set(), 'viewer-1');
+    expect(items.length).toBe(0);
+    expect(report.excludedCounts.not_active).toBe(1);
+  });
 });

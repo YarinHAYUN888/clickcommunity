@@ -13,6 +13,7 @@ import { springs } from '@/lib/motion';
 interface EventCardProps {
   event: EventRow;
   index: number;
+  mutualMatchCount?: number;
 }
 
 function useCountdown(dateStr: string, timeStr: string) {
@@ -45,7 +46,7 @@ function useCountdown(dateStr: string, timeStr: string) {
   return { text, urgency };
 }
 
-export default function EventCard({ event, index }: EventCardProps) {
+export default function EventCard({ event, index, mutualMatchCount = 0 }: EventCardProps) {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-50px' });
@@ -144,6 +145,12 @@ export default function EventCard({ event, index }: EventCardProps) {
         {/* Info */}
         <div className="p-4 space-y-3">
           <h3 className="font-bold text-lg text-foreground truncate">{event.name}</h3>
+
+          {mutualMatchCount > 0 && (
+            <p className="text-xs text-primary font-medium">
+              {mutualMatchCount} התאמות הדדיות באירוע
+            </p>
+          )}
 
           <div className="space-y-1.5 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">

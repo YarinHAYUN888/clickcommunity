@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
+const ALLOWED_VOTES = new Set(["clicked", "no_click"]);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -33,14 +35,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Verify voter attended the event
     const { data: registration } = await supabase
       .from("event_registrations")
       .select("status")
       .eq("event_id", event_id)
       .eq("user_id", user.id)
       .in("status", ["registered", "approved"])
-      .single();
+      .maybeSingle();
 
     if (!registration) {
       return new Response(JSON.stringify({ error: "You did not attend this event" }), {
@@ -48,22 +49,64 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Verify event is past and within 24h voting window
     const { data: event } = await supabase
-      .from("events").select("date, status").eq("id", event_id).single();
+      .from("events")
+      .select("status, is_past_voting_open")
+      .eq("id", event_id)
+      .maybeSingle();
+
     if (!event || event.status !== "past") {
       return new Response(JSON.stringify({ error: "Voting not available for this event" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Insert votes (upsert to handle re-votes)
-    const voteRows = votes.map((v: { votee_id: string; vote: string }) => ({
-      event_id,
-      voter_id: user.id,
-      votee_id: v.votee_id,
-      vote: v.vote,
-    }));
+    if (!event.is_past_voting_open) {
+      return new Response(JSON.stringify({ error: "Voting window is closed for this event" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: attendeeRegs } = await supabase
+      .from("event_registrations")
+      .select("user_id")
+      .eq("event_id", event_id)
+      .in("status", ["registered", "approved"]);
+
+    const attendeeIds = new Set((attendeeRegs || []).map((r: { user_id: string }) => r.user_id));
+
+    const voteRows: { event_id: string; voter_id: string; votee_id: string; vote: string }[] = [];
+    for (const v of votes as { votee_id?: string; vote?: string }[]) {
+      const voteeId = typeof v.votee_id === "string" ? v.votee_id.trim() : "";
+      const vote = typeof v.vote === "string" ? v.vote.trim() : "";
+      if (!voteeId || voteeId === user.id) {
+        return new Response(JSON.stringify({ error: "Invalid votee_id" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!ALLOWED_VOTES.has(vote)) {
+        return new Response(JSON.stringify({ error: "Invalid vote value" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!attendeeIds.has(voteeId)) {
+        return new Response(JSON.stringify({ error: "Votee was not an attendee" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      voteRows.push({
+        event_id,
+        voter_id: user.id,
+        votee_id: voteeId,
+        vote,
+      });
+    }
+
+    if (voteRows.length === 0) {
+      return new Response(JSON.stringify({ error: "No votes to submit" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const { error: insertError } = await supabase
       .from("event_votes")
@@ -77,7 +120,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      votes_submitted: votes.length,
+      votes_submitted: voteRows.length,
     }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

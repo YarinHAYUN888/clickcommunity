@@ -4,7 +4,7 @@ import { ClipboardList, X, User } from 'lucide-react';
 import { toast } from 'sonner';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
-import { updateProfileSuitability } from '@/services/admin';
+import { updateProfileSuitability, getProfileReceptionStats } from '@/services/admin';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import type { Database } from '@/integrations/supabase/types';
 import { formatQuestionnaireForAdmin } from '@/data/introductionQuestionnaire';
@@ -19,6 +19,8 @@ export function UserReviewSection() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [likeCount, setLikeCount] = useState<number | null>(null);
+  const [likeCountLoading, setLikeCountLoading] = useState(false);
 
   const selectedRow = useMemo(
     () => rows.find((r) => r.user_id === selectedUserId) ?? null,
@@ -82,6 +84,28 @@ export function UserReviewSection() {
       setSelectedUserId(rows[0].user_id);
     }
   }, [panelOpen, rows, selectedUserId]);
+
+  useEffect(() => {
+    if (!panelOpen || !selectedUserId) {
+      setLikeCount(null);
+      return;
+    }
+    let cancelled = false;
+    setLikeCountLoading(true);
+    void getProfileReceptionStats(selectedUserId)
+      .then((res) => {
+        if (!cancelled) setLikeCount(res.like_count);
+      })
+      .catch(() => {
+        if (!cancelled) setLikeCount(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLikeCountLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [panelOpen, selectedUserId]);
 
   async function act(userId: string, suitability_status: 'active' | 'shadow' | 'blocked') {
     setBusyId(userId);
@@ -276,6 +300,13 @@ export function UserReviewSection() {
                             {r.ai_summary}
                           </p>
                         )}
+                        <p className="text-xs text-foreground bg-primary/5 rounded-xl px-3 py-2">
+                          {likeCountLoading
+                            ? 'טוען קליקים…'
+                            : likeCount != null
+                              ? `${likeCount} קליקים מהקהילה`
+                              : 'לא ניתן לטעון מספר קליקים'}
+                        </p>
                         <div className="text-[11px] text-muted-foreground bg-muted/30 rounded-xl p-2 space-y-1">
                           <p>החלטת AI: <span className="text-foreground font-semibold">{r.moderation_status || 'pending'}</span></p>
                           <p>ביטחון: <span className="text-foreground font-semibold">{r.moderation_confidence ?? '—'}</span></p>

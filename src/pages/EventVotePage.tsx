@@ -3,16 +3,19 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import GlassCard from '@/components/clicks/GlassCard';
-import { getEventById, getVotableAttendees, submitVotes, EventRow } from '@/services/events';
+import {
+  getEventById,
+  getVotableAttendees,
+  getMyEventVotesForEvent,
+  submitVotes,
+  EventRow,
+} from '@/services/events';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useUserMode } from '@/hooks/useUserMode';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 
-interface VoteEntry {
-  votee_id: string;
-  vote: 'clicked' | 'didnt_talk' | 'no_click';
-}
+type VoteChoice = 'clicked' | 'no_click';
 
 export default function EventVotePage() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -21,7 +24,7 @@ export default function EventVotePage() {
   const { isShadowUser } = useUserMode();
   const [event, setEvent] = useState<EventRow | null>(null);
   const [attendees, setAttendees] = useState<any[]>([]);
-  const [votes, setVotes] = useState<Record<string, VoteEntry['vote']>>({});
+  const [votes, setVotes] = useState<Record<string, VoteChoice>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -41,12 +44,32 @@ export default function EventVotePage() {
         return;
       }
 
-      const attResult = await Promise.allSettled([getVotableAttendees(eventId, authId)]);
+      if (ev.status !== 'past' || !ev.is_past_voting_open) {
+        setAttendees([]);
+        setLoading(false);
+        return;
+      }
+
+      const [attResult, existingVotes] = await Promise.allSettled([
+        getVotableAttendees(eventId, authId),
+        getMyEventVotesForEvent(eventId, authId),
+      ]);
+
       if (cancelled) return;
 
-      setAttendees(
-        attResult[0].status === 'fulfilled' ? attResult[0].value : [],
-      );
+      const att = attResult.status === 'fulfilled' ? attResult.value : [];
+      setAttendees(att);
+
+      if (existingVotes.status === 'fulfilled') {
+        const initial: Record<string, VoteChoice> = {};
+        for (const row of existingVotes.value) {
+          if (row.vote === 'clicked' || row.vote === 'no_click') {
+            initial[row.votee_id] = row.vote;
+          }
+        }
+        setVotes(initial);
+      }
+
       setLoading(false);
     })();
 
@@ -63,10 +86,14 @@ export default function EventVotePage() {
     try {
       const voteArray = Object.entries(votes).map(([votee_id, vote]) => ({ votee_id, vote }));
       await submitVotes(eventId, voteArray);
-      toast({ title: 'תודה על ההצבעה! 🙏' });
+      toast({ title: 'תודה על ההצבעה!' });
       navigate('/events');
-    } catch (err: any) {
-      toast({ title: 'שגיאה', description: err.message, variant: 'destructive' });
+    } catch (err: unknown) {
+      toast({
+        title: 'שגיאה',
+        description: err instanceof Error ? err.message : 'נסו שוב',
+        variant: 'destructive',
+      });
     }
     setSubmitting(false);
   };
@@ -84,6 +111,24 @@ export default function EventVotePage() {
     );
   }
 
+  if (!event) {
+    return (
+      <div className="min-h-screen pb-4 text-center py-20 px-6">
+        <p className="text-lg font-semibold text-foreground">אירוע לא נמצא</p>
+        <button onClick={() => navigate('/events')} className="mt-4 text-primary text-sm">חזרה לאירועים</button>
+      </div>
+    );
+  }
+
+  if (event.status !== 'past' || !event.is_past_voting_open) {
+    return (
+      <div className="min-h-screen pb-4 text-center py-20 px-6">
+        <p className="text-lg font-semibold text-foreground">ההצבעה אינה פתוחה לאירוע זה</p>
+        <button onClick={() => navigate(`/events/${eventId}`)} className="mt-4 text-primary text-sm">חזרה לפרטי האירוע</button>
+      </div>
+    );
+  }
+
   const formatDate = (d: string) => {
     const date = new Date(d);
     return `${date.getDate()}.${date.getMonth() + 1}`;
@@ -91,23 +136,19 @@ export default function EventVotePage() {
 
   return (
     <div className="min-h-screen pb-32">
-      {/* Header */}
       <div className="sticky top-0 z-40 glass-strong px-6 pt-[env(safe-area-inset-top)] pb-4 border-b border-border/30">
         <div className="flex items-center gap-3 pt-4 mb-2">
-          <button onClick={() => navigate('/events')} className="p-1"><ArrowRight size={20} /></button>
+          <button onClick={() => navigate(`/events/${eventId}`)} className="p-1"><ArrowRight size={20} /></button>
           <h1 className="text-xl font-bold text-foreground">מי עשה עליך רושם?</h1>
         </div>
-        <p className="text-sm text-muted-foreground">דרגו את החדשים שפגשתם באירוע</p>
-        {event && (
-          <p className="text-sm text-primary font-medium mt-1">{event.name} — {formatDate(event.date)}</p>
-        )}
+        <p className="text-sm text-muted-foreground">סמנ/י לכל משתתף/ת: היה קליק או לא</p>
+        <p className="text-sm text-primary font-medium mt-1">{event.name} — {formatDate(event.date)}</p>
       </div>
 
-      {/* Voting Cards */}
       <div className="px-4 pt-4 space-y-4 max-w-[560px] mx-auto">
         {attendees.length === 0 ? (
           <div className="text-center py-20">
-            <p className="text-lg font-semibold text-foreground">אין חדשים להצבעה באירוע הזה</p>
+            <p className="text-lg font-semibold text-foreground">אין משתתפים נוספים להצבעה</p>
           </div>
         ) : (
           attendees.map((attendee, i) => (
@@ -126,18 +167,16 @@ export default function EventVotePage() {
                   />
                   <div>
                     <h3 className="font-bold text-foreground">{attendee.first_name}</h3>
-                    <span className="text-xs bg-success/10 text-success px-2 py-0.5 rounded-[999px]">חדש 🌱</span>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   {([
                     { value: 'clicked' as const, label: 'היה קליק 💜', selected: 'bg-primary text-primary-foreground', unselected: 'bg-secondary border border-primary/30 text-primary' },
-                    { value: 'didnt_talk' as const, label: 'לא יצא לדבר 🤷', selected: 'bg-muted-foreground text-white', unselected: 'bg-card border border-border text-muted-foreground' },
-                    { value: 'no_click' as const, label: 'לא היה קליק', selected: 'bg-destructive/10 text-destructive', unselected: 'bg-card border border-border text-muted-foreground' },
+                    { value: 'no_click' as const, label: 'לא היה קליק', selected: 'bg-destructive/10 text-destructive border border-destructive/30', unselected: 'bg-card border border-border text-muted-foreground' },
                   ]).map(opt => (
                     <motion.button
                       key={opt.value}
-                      whileTap={{ scale: 1.1 }}
+                      whileTap={{ scale: 1.05 }}
                       onClick={() => setVotes(prev => ({ ...prev, [attendee.user_id]: opt.value }))}
                       className={`px-3.5 py-2 rounded-[999px] text-xs font-medium transition-all ${
                         votes[attendee.user_id] === opt.value ? opt.selected : opt.unselected
@@ -153,7 +192,6 @@ export default function EventVotePage() {
         )}
       </div>
 
-      {/* Sticky Progress + Submit */}
       {attendees.length > 0 && (
         <div className="fixed bottom-20 inset-x-0 z-30 px-6 pb-2 pt-4 bg-gradient-to-t from-background to-transparent">
           <div className="max-w-[560px] mx-auto space-y-3">

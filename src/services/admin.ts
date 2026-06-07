@@ -149,6 +149,17 @@ export async function updateProfileSuitability(
   throw new Error('Profile suitability update failed after compatibility retries');
 }
 
+export async function getProfileReceptionStats(targetUserId: string): Promise<{ like_count: number }> {
+  const { data, error } = await supabase.functions.invoke('get-profile-reception-stats', {
+    body: { target_user_id: targetUserId },
+  });
+  if (error) throw new Error(error.message || 'Failed to load profile stats');
+  if (data && typeof data === 'object' && 'error' in data) {
+    throw new Error(String((data as { error?: string }).error || 'Failed to load profile stats'));
+  }
+  return { like_count: Number((data as { like_count?: number })?.like_count) || 0 };
+}
+
 export async function uploadEventCover(eventId: string, file: File) {
   console.log('UPLOAD FILE:', file);
 

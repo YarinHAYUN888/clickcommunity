@@ -183,9 +183,15 @@ export default function EventsCalendarView({ currentUserId, isShadowUser = false
 
   // Selected day events
   const selectedKey = format(selectedDate, 'yyyy-MM-dd');
-  const dayEvents = (eventsByDate[selectedKey] || []).slice().sort((a, b) =>
-    (a.time || '').localeCompare(b.time || ''),
-  );
+  const dayEvents = (eventsByDate[selectedKey] || []).slice().sort((a, b) => {
+    const ma = a.mutual_match_count ?? 0;
+    const mb = b.mutual_match_count ?? 0;
+    if (mb !== ma) return mb - ma;
+    const ca = a.click_score ?? 0;
+    const cb = b.click_score ?? 0;
+    if (cb !== ca) return cb - ca;
+    return (a.time || '').localeCompare(b.time || '');
+  });
 
   const goPrevMonth = () => setMonth(m => subMonths(m, 1));
   const goNextMonth = () => setMonth(m => addMonths(m, 1));

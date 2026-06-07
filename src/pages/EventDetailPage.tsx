@@ -548,6 +548,19 @@ export default function EventDetailPage() {
             </div>
           </div>
         )}
+
+        {isPast && event.is_past_voting_open && (
+          <GlassCard className="p-4">
+            <p className="text-sm text-foreground mb-3">סמנ/י מי מהמשתתפים/ות היה קליק בשבילך</p>
+            <button
+              type="button"
+              onClick={() => navigate(`/events/${eventId}/vote`)}
+              className="w-full rounded-xl gradient-primary text-primary-foreground py-3 font-semibold text-sm"
+            >
+              דרג/י משתתפים
+            </button>
+          </GlassCard>
+        )}
       </div>
 
       {/* Sticky CTA */}

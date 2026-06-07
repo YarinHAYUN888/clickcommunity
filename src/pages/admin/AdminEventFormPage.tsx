@@ -239,6 +239,8 @@ export default function AdminEventFormPage() {
     name: '', date: '', time: '', location_name: '', location_address: '', location_url: '',
     description: '', max_capacity: 40, reserved_new_spots: 10, gender_balance_target: 0.5,
     cover_image_url: '', requires_subscription: false,
+    eventStatus: 'open' as string,
+    is_past_voting_open: false,
   });
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
@@ -259,6 +261,8 @@ export default function AdminEventFormPage() {
           max_capacity: data.max_capacity || 40, reserved_new_spots: data.reserved_new_spots || 10,
           gender_balance_target: Number(data.gender_balance_target) || 0.5, cover_image_url: data.cover_image_url || '',
           requires_subscription: data.requires_subscription === true,
+          eventStatus: data.status || 'open',
+          is_past_voting_open: data.is_past_voting_open === true,
         });
         setLoading(false);
       });
@@ -305,7 +309,10 @@ export default function AdminEventFormPage() {
         requires_subscription: form.requires_subscription,
       };
       if (isEdit) {
-        await performAdminAction('update_event', 'event', eventId, eventData);
+        await performAdminAction('update_event', 'event', eventId, {
+          ...eventData,
+          is_past_voting_open: form.is_past_voting_open,
+        });
         toast.success('האירוע עודכן!');
         navigate(`/admin/events/${eventId}`);
       } else {
@@ -321,6 +328,19 @@ export default function AdminEventFormPage() {
             ? String((err as { message?: unknown }).message)
             : 'שגיאה בשמירה';
       toast.error(message || 'שגיאה בשמירה');
+    }
+    setSaving(false);
+  };
+
+  const handleMarkPast = async () => {
+    if (!eventId) return;
+    setSaving(true);
+    try {
+      await performAdminAction('update_event', 'event', eventId, { status: 'past' });
+      setForm((f) => ({ ...f, eventStatus: 'past' }));
+      toast.success('האירוע סומן כעבר');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'עדכון נכשל');
     }
     setSaving(false);
   };
@@ -553,6 +573,44 @@ export default function AdminEventFormPage() {
                 </div>
               </div>
             </div>
+
+            {isEdit && (
+              <>
+                <hr className="divider-fade" />
+                <div className="space-y-4">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/60">
+                    סטטוס אירוע
+                  </h3>
+                  <div className="rounded-2xl border border-border/60 bg-white/75 px-4 py-4 space-y-3">
+                    <p className="text-sm text-foreground">
+                      סטטוס נוכחי: <span className="font-semibold">{form.eventStatus}</span>
+                    </p>
+                    {form.eventStatus !== 'past' && (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void handleMarkPast()}
+                        className="w-full py-2.5 rounded-xl text-sm font-semibold border border-border hover:bg-muted/50 disabled:opacity-50"
+                      >
+                        סמן כעבר
+                      </button>
+                    )}
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="past-voting-open" className="text-sm cursor-pointer">
+                        הצבעה פתוחה (אחרי האירוע)
+                      </label>
+                      <Switch
+                        id="past-voting-open"
+                        checked={form.is_past_voting_open}
+                        onCheckedChange={(checked) =>
+                          setForm((f) => ({ ...f, is_past_voting_open: !!checked }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <hr className="divider-fade" />
 

@@ -57,10 +57,14 @@ Deno.serve(async (req) => {
       meErr ||
       !meProf ||
       meProf.suspended === true ||
-      meProf.moderation_status !== "approved" ||
-      meProf.suitability_status !== "active" ||
-      meProf.is_shadow === true
+      meProf.moderation_status !== "approved"
     ) {
+      return new Response(JSON.stringify({ error: "not_allowed" }), { status: 403, headers: corsHeaders });
+    }
+
+    const meIsShadow = meProf.suitability_status === "shadow" && meProf.is_shadow === true;
+    const meIsActive = meProf.suitability_status === "active" && !meProf.is_shadow;
+    if (!meIsShadow && !meIsActive) {
       return new Response(JSON.stringify({ error: "not_allowed" }), { status: 403, headers: corsHeaders });
     }
 
@@ -79,10 +83,17 @@ Deno.serve(async (req) => {
         otErr ||
         !otProf ||
         otProf.suspended === true ||
-        otProf.moderation_status !== "approved" ||
-        otProf.suitability_status !== "active" ||
-        otProf.is_shadow === true
+        otProf.moderation_status !== "approved"
       ) {
+        continue;
+      }
+
+      const otIsShadow = otProf.suitability_status === "shadow" && otProf.is_shadow === true;
+      const otIsActive = otProf.suitability_status === "active" && !otProf.is_shadow;
+      if (meIsShadow !== otIsShadow) continue;
+      if (meIsShadow) {
+        if (!otIsShadow) continue;
+      } else if (!otIsActive) {
         continue;
       }
 
