@@ -17,6 +17,7 @@ import ClicksPage from "./pages/ClicksPage";
 import EventsPage from "./pages/EventsPage";
 import EventDetailPage from "./pages/EventDetailPage";
 import EventVotePage from "./pages/EventVotePage";
+import MemberEventFormPage from "./pages/MemberEventFormPage";
 import ChatsPage from "./pages/ChatsPage";
 import ChatConversationPage from "./pages/ChatConversationPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -74,6 +75,7 @@ const App = () => (
                   <Route element={<MainLayout />}>
                     <Route path="/clicks" element={<ClicksPage />} />
                     <Route path="/events" element={<EventsPage />} />
+                    <Route path="/events/create" element={<MemberEventFormPage />} />
                     <Route path="/events/:eventId" element={<EventDetailPage />} />
                     <Route path="/events/:eventId/vote" element={<EventVotePage />} />
                     <Route path="/chats" element={<ChatsPage />} />

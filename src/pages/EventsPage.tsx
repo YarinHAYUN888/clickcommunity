@@ -3,10 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, CalendarCheck, CalendarDays } from 'lucide-react';
 import EventCard from '@/components/clicks/EventCard';
 import EventsCalendarView from '@/components/clicks/EventsCalendarView';
-import { getUpcomingEventsRanked, getPastEventsRanked, RankedEventRow } from '@/services/events';
+import { getUpcomingEventsRanked, getPastEventsRanked, syncPastEventsIfNeeded, RankedEventRow } from '@/services/events';
+import { MEMBER_EVENT_MIN_POINTS } from '@/config/points';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useUserMode } from '@/hooks/useUserMode';
+import { useNavigate } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 
 type TabId = 'upcoming' | 'past' | 'calendar';
 
@@ -17,11 +20,19 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export default function EventsPage() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<TabId>('upcoming');
   const [events, setEvents] = useState<RankedEventRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const { authId } = useCurrentUser();
+  const { authId, profile, role } = useCurrentUser();
   const { isShadowUser } = useUserMode();
+  const points = (profile as { points?: number | null } | null)?.points ?? 0;
+  const canCreateEvent = role === 'member' && points >= MEMBER_EVENT_MIN_POINTS;
+  const pointsToCreate = Math.max(0, MEMBER_EVENT_MIN_POINTS - points);
+
+  useEffect(() => {
+    void syncPastEventsIfNeeded();
+  }, []);
 
   useEffect(() => {
     if (tab === 'calendar') {
@@ -78,6 +89,25 @@ export default function EventsPage() {
             })}
           </div>
         </div>
+
+        {role === 'member' && tab === 'upcoming' && (
+          <div className="mt-3">
+            {canCreateEvent ? (
+              <button
+                type="button"
+                onClick={() => navigate('/events/create')}
+                className="w-full flex items-center justify-center gap-2 rounded-xl gradient-primary text-primary-foreground py-2.5 text-sm font-semibold"
+              >
+                <Plus size={16} />
+                צור/י אירוע
+              </button>
+            ) : (
+              <p className="text-center text-xs text-muted-foreground bg-secondary/60 rounded-xl py-2.5 px-3">
+                עוד {pointsToCreate} נקודות ליצירת אירוע
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -150,6 +180,7 @@ export default function EventsPage() {
                   event={event}
                   index={index}
                   mutualMatchCount={event.mutual_match_count}
+                  veteranScore={event.veteran_score}
                 />
               ))}
             </motion.div>

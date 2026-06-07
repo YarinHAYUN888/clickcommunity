@@ -45,12 +45,26 @@ describe('sortEventsByMatchPriority', () => {
       baseEvent('e3', '2026-11-28', '18:00:00'),
     ];
     const scores = new Map([
-      ['e1', { mutual_score: 0, click_score: 1 }],
-      ['e2', { mutual_score: 2, click_score: 0 }],
-      ['e3', { mutual_score: 1, click_score: 3 }],
+      ['e1', { mutual_score: 0, click_score: 1, veteran_score: 0 }],
+      ['e2', { mutual_score: 2, click_score: 0, veteran_score: 0 }],
+      ['e3', { mutual_score: 1, click_score: 3, veteran_score: 0 }],
     ]);
     const sorted = sortEventsByMatchPriority(events, scores);
     expect(sorted.map((e) => e.id)).toEqual(['e2', 'e3', 'e1']);
     expect(sorted.length).toBe(3);
+  });
+
+  it('uses veteran_score as tertiary sort key', () => {
+    const events = [
+      baseEvent('e1', '2026-12-01', '20:00:00'),
+      baseEvent('e2', '2026-12-02', '19:00:00'),
+    ];
+    const scores = new Map([
+      ['e1', { mutual_score: 1, click_score: 1, veteran_score: 0 }],
+      ['e2', { mutual_score: 1, click_score: 1, veteran_score: 3 }],
+    ]);
+    const sorted = sortEventsByMatchPriority(events, scores);
+    expect(sorted.map((e) => e.id)).toEqual(['e2', 'e1']);
+    expect(sorted[0].veteran_score).toBe(3);
   });
 });

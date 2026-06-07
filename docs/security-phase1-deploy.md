@@ -59,6 +59,27 @@ npx supabase functions deploy get-profile-reception-stats submit-votes register-
 
 Post-deploy QA: admin user review shows like count; past event with voting open allows binary vote; new events have `status=open`; event list ranks by mutual matches without hiding events.
 
+After remaining gaps (member events, auto-past, veteran ranking, event clicks tab):
+
+```bash
+npx supabase functions deploy create-member-event sync-past-events get-profile-reception-stats submit-votes register-for-event admin-action compute-compatibility --project-ref lwprevqahebqenpzdvle
+```
+
+Post-deploy QA checklist:
+
+| # | Check |
+|---|--------|
+| 1 | Member with 199 points — no create button |
+| 2 | Member with 200+ — creates event → appears in list → opens → registration works |
+| 3 | Super-admin create unchanged |
+| 4 | Past-date event auto-marked `past`; admin opens voting → vote works |
+| 5 | Event list sorted mutual → click → veterans; all events still shown |
+| 6 | Clicks tab "לאירוע הקרוב" shows matches |
+| 7 | Admin shadow — confirmation modal + click count; shadow user feed works, no member-facing "מבודד" |
+| 8 | `npm run test` passes |
+
+Frontend: push `src/` changes to production after edge deploy.
+
 ### OTP payload contract (email)
 
 After changing `onboardingOtpCore` / `n8nOtpEnvelope`, redeploy at minimum:

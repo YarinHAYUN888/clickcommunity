@@ -21,6 +21,7 @@ export function UserReviewSection() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [likeCount, setLikeCount] = useState<number | null>(null);
   const [likeCountLoading, setLikeCountLoading] = useState(false);
+  const [shadowConfirmUserId, setShadowConfirmUserId] = useState<string | null>(null);
 
   const selectedRow = useMemo(
     () => rows.find((r) => r.user_id === selectedUserId) ?? null,
@@ -106,6 +107,11 @@ export function UserReviewSection() {
       cancelled = true;
     };
   }, [panelOpen, selectedUserId]);
+
+  const shadowConfirmRow = useMemo(
+    () => rows.find((r) => r.user_id === shadowConfirmUserId) ?? null,
+    [rows, shadowConfirmUserId],
+  );
 
   async function act(userId: string, suitability_status: 'active' | 'shadow' | 'blocked') {
     setBusyId(userId);
@@ -331,7 +337,7 @@ export function UserReviewSection() {
                     <button
                       type="button"
                       disabled={busyId === selectedRow.user_id}
-                      onClick={() => void act(selectedRow.user_id, 'shadow')}
+                      onClick={() => setShadowConfirmUserId(selectedRow.user_id)}
                       className="py-2.5 rounded-xl text-xs font-semibold border border-border hover:bg-muted/60 disabled:opacity-50"
                     >
                       סביבה מבודדת
@@ -347,6 +353,73 @@ export function UserReviewSection() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {shadowConfirmRow && (
+          <motion.div
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              aria-label="סגירה"
+              onClick={() => setShadowConfirmUserId(null)}
+            />
+            <motion.div
+              dir="rtl"
+              className="relative w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl p-5 space-y-4"
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+            >
+              <h3 className="text-lg font-bold text-foreground">העברה לסביבה מבודדת</h3>
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p>
+                  <span className="font-semibold text-foreground">{shadowConfirmRow.first_name || 'משתמש/ת'}</span>
+                  {' '}יועבר/ת לקהילה נפרדת.
+                </p>
+                {Array.isArray(shadowConfirmRow.interests) && shadowConfirmRow.interests.length > 0 && (
+                  <p>תחביבים: {shadowConfirmRow.interests.slice(0, 5).join(', ')}</p>
+                )}
+                <p>
+                  {likeCountLoading
+                    ? 'טוען קליקים…'
+                    : likeCount != null
+                      ? `${likeCount} קליקים מהקהילה`
+                      : 'מספר קליקים לא זמין'}
+                </p>
+                <p className="text-foreground/90">
+                  המשתמש/ת לא יראה/תראה את המילה &quot;מבודד&quot; — רק חוויית קהילה רגילה.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShadowConfirmUserId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-border"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === shadowConfirmRow.user_id}
+                  onClick={() => {
+                    const userId = shadowConfirmRow.user_id;
+                    setShadowConfirmUserId(null);
+                    void act(userId, 'shadow');
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50"
+                >
+                  אישור העברה
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

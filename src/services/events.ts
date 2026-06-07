@@ -154,7 +154,24 @@ export const EVENT_CLICK_COMPAT_THRESHOLD = 40;
 export type RankedEventRow = EventRow & {
   mutual_match_count?: number;
   click_score?: number;
+  veteran_score?: number;
 };
+
+const SYNC_PAST_EVENTS_LS_KEY = 'clicks_sync_past_events_at';
+const SYNC_PAST_EVENTS_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Calls sync-past-events edge at most once per hour per browser. */
+export async function syncPastEventsIfNeeded(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const last = Number(localStorage.getItem(SYNC_PAST_EVENTS_LS_KEY) || 0);
+  if (Date.now() - last < SYNC_PAST_EVENTS_INTERVAL_MS) return;
+  try {
+    const { error } = await supabase.functions.invoke('sync-past-events');
+    if (!error) localStorage.setItem(SYNC_PAST_EVENTS_LS_KEY, String(Date.now()));
+  } catch {
+    /* best-effort */
+  }
+}
 
 type ProfileSignals = { interests: string[] | null; region: string | null };
 
@@ -172,14 +189,15 @@ export function computeAttendeeCompatScore(viewer: ProfileSignals, attendee: Pro
 
 export function sortEventsByMatchPriority(
   events: EventRow[],
-  scoresByEventId: Map<string, { mutual_score: number; click_score: number }>,
+  scoresByEventId: Map<string, { mutual_score: number; click_score: number; veteran_score: number }>,
 ): RankedEventRow[] {
   return [...events]
     .sort((a, b) => {
-      const sa = scoresByEventId.get(a.id) ?? { mutual_score: 0, click_score: 0 };
-      const sb = scoresByEventId.get(b.id) ?? { mutual_score: 0, click_score: 0 };
+      const sa = scoresByEventId.get(a.id) ?? { mutual_score: 0, click_score: 0, veteran_score: 0 };
+      const sb = scoresByEventId.get(b.id) ?? { mutual_score: 0, click_score: 0, veteran_score: 0 };
       if (sb.mutual_score !== sa.mutual_score) return sb.mutual_score - sa.mutual_score;
       if (sb.click_score !== sa.click_score) return sb.click_score - sa.click_score;
+      if (sb.veteran_score !== sa.veteran_score) return sb.veteran_score - sa.veteran_score;
       const dateCmp = a.date.localeCompare(b.date);
       if (dateCmp !== 0) return dateCmp;
       return (a.time || '').localeCompare(b.time || '');
@@ -190,6 +208,7 @@ export function sortEventsByMatchPriority(
         ...e,
         mutual_match_count: scores?.mutual_score ?? 0,
         click_score: scores?.click_score ?? 0,
+        veteran_score: scores?.veteran_score ?? 0,
       };
     });
 }
@@ -230,7 +249,7 @@ export async function rankEventsForViewer(
       supabase.from('profiles').select('interests, region').eq('user_id', viewerId).maybeSingle(),
       supabase
         .from('profiles')
-        .select('user_id, interests, region')
+        .select('user_id, interests, region, status')
         .in('user_id', attendeeIdList),
       supabase
         .from('profile_swipes')
@@ -251,30 +270,34 @@ export async function rankEventsForViewer(
     region: viewerProfile?.region ?? null,
   };
 
-  const profileById = new Map<string, ProfileSignals>();
+  const profileById = new Map<string, ProfileSignals & { status?: string | null }>();
   for (const p of attendeeProfiles || []) {
     profileById.set(p.user_id, {
       interests: (p.interests as string[] | null) ?? null,
       region: p.region ?? null,
+      status: p.status ?? null,
     });
   }
 
   const iLiked = new Set((myLikes || []).map((r) => r.to_user_id));
   const likedMe = new Set((likesToMe || []).map((r) => r.from_user_id));
 
-  const scoresByEventId = new Map<string, { mutual_score: number; click_score: number }>();
+  const scoresByEventId = new Map<string, { mutual_score: number; click_score: number; veteran_score: number }>();
   for (const eventId of eventIds) {
     const attendeeIds = attendeesByEvent.get(eventId) || [];
     let mutual_score = 0;
     let click_score = 0;
+    let veteran_score = 0;
     for (const aid of attendeeIds) {
       if (iLiked.has(aid) && likedMe.has(aid)) mutual_score += 1;
       const signals = profileById.get(aid);
       if (!signals) continue;
       const compat = computeAttendeeCompatScore(viewerSignals, signals);
       if (compat >= EVENT_CLICK_COMPAT_THRESHOLD) click_score += 1;
+      const st = signals.status;
+      if (st === 'veteran' || st === 'ambassador') veteran_score += 1;
     }
-    scoresByEventId.set(eventId, { mutual_score, click_score });
+    scoresByEventId.set(eventId, { mutual_score, click_score, veteran_score });
   }
 
   return sortEventsByMatchPriority(events, scoresByEventId);
@@ -776,6 +799,74 @@ export async function cancelEventRegistration(eventId: string) {
     throw new Error(String((data as { message?: string }).message || (data as { error: string }).error));
   }
   return data;
+}
+
+export type MemberEventCreatePayload = {
+  name: string;
+  date: string;
+  time: string;
+  location_name: string;
+  location_address?: string | null;
+  location_url?: string | null;
+  description?: string | null;
+  cover_image_url?: string | null;
+  max_capacity?: number;
+  reserved_new_spots?: number;
+};
+
+export async function createMemberEvent(payload: MemberEventCreatePayload): Promise<EventRow> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase.functions.invoke('create-member-event', { body: payload });
+  const body = await parseEdgeFunctionJsonBody(data, error);
+
+  if (body?.ok === false) {
+    const message =
+      typeof body.message === 'string' && body.message.trim()
+        ? body.message
+        : 'יצירת אירוע נכשלה';
+    throw new Error(message);
+  }
+
+  if (body?.ok === true && body.event && typeof body.event === 'object') {
+    return body.event as EventRow;
+  }
+
+  if (error) throw new Error(error.message || 'יצירת אירוע נכשלה');
+  throw new Error('יצירת אירוע נכשלה');
+}
+
+/** Next upcoming event the user is registered for (by date/time). */
+export async function getNextRegisteredUpcomingEvent(
+  userId: string,
+  isShadowUser = false,
+): Promise<EventRow | null> {
+  if (!userId) return null;
+
+  const today = new Date().toISOString().split('T')[0];
+  const { data: regs, error: regErr } = await supabase
+    .from('event_registrations')
+    .select('event_id')
+    .eq('user_id', userId)
+    .in('status', ['registered', 'approved']);
+
+  if (regErr || !regs?.length) return null;
+
+  const eventIds = regs.map((r) => r.event_id);
+  const { data: events, error: evErr } = await supabase
+    .from('events')
+    .select('*')
+    .in('id', eventIds)
+    .in('status', ['open', 'almost_full', 'full'])
+    .gte('date', today)
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+
+  if (evErr || !events?.length) return null;
+
+  const visible = await filterEventsByHostIsolation(events as EventRow[], isShadowUser);
+  return visible[0] ?? null;
 }
 
 export async function registerForEvent(eventId: string): Promise<EventRegistrationResult> {

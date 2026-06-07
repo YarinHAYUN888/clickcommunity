@@ -549,9 +549,10 @@ export default function EventDetailPage() {
           </div>
         )}
 
-        {isPast && event.is_past_voting_open && (
-          <GlassCard className="p-4">
-            <p className="text-sm text-foreground mb-3">סמנ/י מי מהמשתתפים/ות היה קליק בשבילך</p>
+        {isPast && event.is_past_voting_open && isRegistered && (
+          <GlassCard className="p-4 border-2 border-primary/40 bg-primary/5">
+            <p className="text-base font-semibold text-foreground mb-1">דרג/י משתתפים</p>
+            <p className="text-sm text-muted-foreground mb-3">סמנ/י מי מהמשתתפים/ות היה קליק בשבילך</p>
             <button
               type="button"
               onClick={() => navigate(`/events/${eventId}/vote`)}

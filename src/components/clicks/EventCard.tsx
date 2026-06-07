@@ -14,6 +14,7 @@ interface EventCardProps {
   event: EventRow;
   index: number;
   mutualMatchCount?: number;
+  veteranScore?: number;
 }
 
 function useCountdown(dateStr: string, timeStr: string) {
@@ -46,7 +47,7 @@ function useCountdown(dateStr: string, timeStr: string) {
   return { text, urgency };
 }
 
-export default function EventCard({ event, index, mutualMatchCount = 0 }: EventCardProps) {
+export default function EventCard({ event, index, mutualMatchCount = 0, veteranScore = 0 }: EventCardProps) {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-50px' });
@@ -76,6 +77,10 @@ export default function EventCard({ event, index, mutualMatchCount = 0 }: EventC
   };
 
   const isPast = event.status === 'past';
+  const isRegistered =
+    registration?.status === 'registered' ||
+    registration?.status === 'approved' ||
+    registration?.status === 'checked_in';
 
   return (
     <motion.div
@@ -128,7 +133,7 @@ export default function EventCard({ event, index, mutualMatchCount = 0 }: EventC
               {event.requires_subscription ? '🔒 דורש מנוי' : '🌍 פתוח לקהילה'}
             </span>
           </div>
-          {isPast && event.is_past_voting_open && (
+          {isPast && event.is_past_voting_open && isRegistered && (
             <div className="absolute top-12 end-3">
               <motion.span
                 animate={{ opacity: [0.7, 1, 0.7] }}
@@ -136,7 +141,7 @@ export default function EventCard({ event, index, mutualMatchCount = 0 }: EventC
                 className="bg-primary text-primary-foreground px-3 py-1 rounded-[999px] text-xs font-bold cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); navigate(`/events/${event.id}/vote`); }}
               >
-                הצביעו עכשיו!
+                הצבעה פתוחה
               </motion.span>
             </div>
           )}
@@ -149,6 +154,12 @@ export default function EventCard({ event, index, mutualMatchCount = 0 }: EventC
           {mutualMatchCount > 0 && (
             <p className="text-xs text-primary font-medium">
               {mutualMatchCount} התאמות הדדיות באירוע
+            </p>
+          )}
+
+          {veteranScore > 0 && (
+            <p className="text-xs text-accent font-medium">
+              {veteranScore} ותיקים באירוע
             </p>
           )}
 

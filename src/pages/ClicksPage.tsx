@@ -8,6 +8,7 @@ import IcebreakerSheet from '@/components/clicks/IcebreakerSheet';
 import FullProfileModal from '@/components/clicks/FullProfileModal';
 import { useCurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
 import { useClicksFeed, ClickFeedItem } from '@/hooks/useClicksFeed';
+import { useEventClicksTab } from '@/hooks/useEventClicksTab';
 import { useCompatibilityLayer } from '@/hooks/useCompatibilityLayer';
 import { useNavigate } from 'react-router-dom';
 import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
@@ -19,13 +20,21 @@ export default function ClicksPage() {
   const navigate = useNavigate();
   const { profile: myProfile, authId, role, loading: userLoading } = useCurrentUser();
   const isMember = role === 'member';
+  const [tab, setTab] = useState<'general' | 'event'>('general');
   /** חובה להשתמש ב-authId מהסשן — לא ב-myProfile.user_id: אחרת כשטעינת הפרופיל מתעכבת הפיד יוצא ריק לצמיתות */
   const { items, loading: feedLoading, error: feedError, refresh } = useClicksFeed(authId, myProfile);
+  const {
+    items: eventTabItems,
+    loading: eventTabLoading,
+    emptyMessage: eventTabEmptyMessage,
+    eventName: eventTabEventName,
+    refresh: refreshEventTab,
+  } = useEventClicksTab(authId);
   const matchByUserId = useCompatibilityLayer(authId, items);
-  const loading = userLoading || feedLoading;
+  const eventMatchByUserId = useCompatibilityLayer(authId, eventTabItems);
+  const loading = userLoading || (tab === 'general' ? feedLoading : eventTabLoading);
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<'general' | 'event'>('general');
   const feedRef = useRef<HTMLDivElement>(null);
 
   // Icebreaker state
@@ -100,7 +109,7 @@ export default function ClicksPage() {
         } else {
           toast('נרשם לייק');
         }
-        await refresh();
+        await (tab === 'general' ? refresh() : refreshEventTab());
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'לא ניתן לשמור את הפעולה.';
         toast.error(msg);
@@ -108,19 +117,20 @@ export default function ClicksPage() {
         setSwipeBusyUserId(null);
       }
     },
-    [isMember, refresh, navigate],
+    [isMember, refresh, refreshEventTab, tab, navigate],
   );
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    refresh().finally(() => {
+    const refreshPromise = tab === 'general' ? refresh() : refreshEventTab();
+    refreshPromise.finally(() => {
       setRefreshing(false);
       setPullY(0);
       if (authId && feedUserIds.length > 0) {
         getUnreadMessageFromUserIds(authId, feedUserIds).then(setUnreadFromUser);
       }
     });
-  }, [refresh, authId, feedUserIds, feedUserIds.length]);
+  }, [tab, refresh, refreshEventTab, authId, feedUserIds, feedUserIds.length]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -138,8 +148,9 @@ export default function ClicksPage() {
     else setPullY(0);
   };
 
-  // For now, all clicks are "general" — event tab will be populated when events system is connected
-  const displayItems = tab === 'general' ? items : [];
+  const activeItems = tab === 'general' ? items : eventTabItems;
+  const activeMatchByUserId = tab === 'general' ? matchByUserId : eventMatchByUserId;
+  const displayItems = activeItems;
 
   return (
     <div className="min-h-screen gradient-bg pb-24">
@@ -181,11 +192,19 @@ export default function ClicksPage() {
       </div>
 
       {/* New clicks counter */}
-      {!loading && items.length > 0 && (
+      {!loading && tab === 'general' && items.length > 0 && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-1.5 py-2">
           <Zap size={16} className="text-accent" />
           <span className="text-sm font-medium text-muted-foreground">
             {items.length} קליקים חדשים היום
+          </span>
+        </motion.div>
+      )}
+
+      {!loading && tab === 'event' && eventTabEventName && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-1.5 py-2 px-4">
+          <span className="text-sm font-medium text-muted-foreground text-center">
+            התאמות ל{eventTabEventName}
           </span>
         </motion.div>
       )}
@@ -204,7 +223,7 @@ export default function ClicksPage() {
         <div className="max-w-[560px] mx-auto">
           {loading ? (
             <ClicksFeedSkeleton />
-          ) : feedError ? (
+          ) : tab === 'general' && feedError ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center py-20">
               <div className="relative mx-auto mb-6 w-24 h-24 flex items-center justify-center">
                 <span className="absolute inset-0 rounded-full bg-gradient-to-br from-destructive/15 to-warning/15 animate-breathe" />
@@ -228,10 +247,14 @@ export default function ClicksPage() {
                 <span className="absolute -bottom-2 -right-3 w-10 h-10 rounded-full blur-2xl" style={{ background: 'rgba(124,58,237,0.18)' }} />
                 <Heart size={42} className="relative text-primary" fill="currentColor" />
               </div>
-              <p className="text-[24px] text-h1-premium text-foreground">עוד אין קליקים</p>
-              <p className="text-[15px] text-muted-foreground mt-2 max-w-[300px] mx-auto leading-relaxed">
-                נחפש קודם אנשים באותה תחום חיים ועם עניינים משותפים, ואז נרחיב בהדרגה לכל חברי הקהילה הזמינים.
+              <p className="text-[24px] text-h1-premium text-foreground">
+                {tab === 'event' ? (eventTabEmptyMessage || 'אין אירוע קרוב רשום') : 'עוד אין קליקים'}
               </p>
+              {tab === 'general' && (
+                <p className="text-[15px] text-muted-foreground mt-2 max-w-[300px] mx-auto leading-relaxed">
+                  נחפש קודם אנשים באותה תחום חיים ועם עניינים משותפים, ואז נרחיב בהדרגה לכל חברי הקהילה הזמינים.
+                </p>
+              )}
             </motion.div>
           ) : (
             <div className="space-y-6">
@@ -247,7 +270,7 @@ export default function ClicksPage() {
                   hasUnreadDm={!!unreadFromUser[item.profile.user_id]}
                   swipeBusy={swipeBusyUserId === item.profile.user_id}
                   onSwipe={(action) => handleSwipe(item.profile.user_id, action)}
-                  matchEnrichment={matchByUserId[item.profile.user_id] ?? null}
+                  matchEnrichment={activeMatchByUserId[item.profile.user_id] ?? null}
                   onViewProfile={() => { setProfileTarget(item); setProfileOpen(true); }}
                   onIcebreaker={() => { setIcebreakerTarget(item); setIcebreakerOpen(true); }}
                 />
