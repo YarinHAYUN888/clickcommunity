@@ -38,7 +38,7 @@ export default function AdminAutomationPage() {
 
   // Manager-side navigation state (hub / wizard / templates / history)
   const [managerSection, setManagerSection] = useState<ManagerSection | 'hub'>('hub');
-  const [defaultRole, setDefaultRole] = useState<DefaultNewUserRoleUi>('community_member');
+  const [defaultRole, setDefaultRole] = useState<DefaultNewUserRoleUi>('guest');
   const [defaultRoleLoading, setDefaultRoleLoading] = useState(false);
 
   const validTab = useMemo((): AutomationTabId => {

@@ -105,6 +105,10 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
         afterEligibilityFilter: eligibleAfterFilter,
         finalDisplayed: feedItems.length,
       });
+      const noPhotoCount = report.excludedCounts.no_photo ?? 0;
+      console.info('CLICKS FILTER - NO PROFILE PHOTO', { excluded: noPhotoCount });
+      console.info('CLICKS FILTER - PASSED PHOTO CHECK', { passed: eligibleAfterFilter });
+      console.info('CLICKS FINAL DISPLAY COUNT', { displayed: feedItems.length });
     }
 
     logFeedExclusionSummary(currentUserId, report, {

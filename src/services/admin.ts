@@ -8,8 +8,8 @@ function toDbRole(role: DefaultNewUserRoleUi): DefaultNewUserRoleDb {
 }
 
 function toUiRole(role: string | null | undefined): DefaultNewUserRoleUi {
-  if (role === 'guest') return 'guest';
-  return 'community_member';
+  if (role === 'member' || role === 'community_member') return 'community_member';
+  return 'guest';
 }
 
 export async function checkSuperUser(userId: string): Promise<string | null> {

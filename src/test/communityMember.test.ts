@@ -12,7 +12,7 @@ describe('community member defaults', () => {
     expect(normalizeDbNewUserRole('community_member')).toBe('member');
     expect(normalizeDbNewUserRole('member')).toBe('member');
     expect(normalizeDbNewUserRole('guest')).toBe('guest');
-    expect(normalizeDbNewUserRole('')).toBe('member');
+    expect(normalizeDbNewUserRole('')).toBe('guest');
   });
 });
 

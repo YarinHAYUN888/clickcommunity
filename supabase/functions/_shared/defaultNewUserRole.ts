@@ -7,7 +7,7 @@ export function normalizeDefaultRole(raw: unknown): NewUserRole {
   if (role === "guest") return "guest";
   if (role === "community_member") return "member";
   if (role === "member") return "member";
-  return "member";
+  return "guest";
 }
 
 export async function getDefaultNewUserRole(
@@ -20,14 +20,14 @@ export async function getDefaultNewUserRole(
       .eq("key", "default_new_user_role")
       .maybeSingle();
     if (error) {
-      console.warn("[defaultNewUserRole] lookup failed, fallback member", error.message);
-      return "member";
+      console.warn("[defaultNewUserRole] lookup failed, fallback guest", error.message);
+      return "guest";
     }
     const role = normalizeDefaultRole(data?.value);
     console.log("DEFAULT ROLE FOUND", { role, raw: data?.value ?? null });
     return role;
   } catch (e) {
-    console.warn("[defaultNewUserRole] lookup crashed, fallback member", e);
-    return "member";
+    console.warn("[defaultNewUserRole] lookup crashed, fallback guest", e);
+    return "guest";
   }
 }

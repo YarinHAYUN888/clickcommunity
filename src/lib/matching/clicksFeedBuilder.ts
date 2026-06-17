@@ -18,6 +18,7 @@ export type ExclusionReason =
   | 'not_approved'
   | 'suspended'
   | 'not_active'
+  | 'no_photo'
   | 'swiped'
   | 'tier_no_match';
 
@@ -39,6 +40,17 @@ export function isShadowProfile(p: Pick<SupabaseProfile, 'suitability_status' | 
   return p.suitability_status === 'shadow' && !!p.is_shadow;
 }
 
+/**
+ * Clicks-feed-only requirement: a profile must have a valid display photo
+ * (non-empty `avatar_url` or a non-empty entry in `photos[]`) to appear in the feed.
+ * Other screens (profile, chats, admin) keep their Avatar fallback behavior.
+ */
+export function hasRequiredClickPhoto(
+  p: Pick<SupabaseProfile, 'photos' | 'avatar_url'> | null | undefined,
+): boolean {
+  return hasDisplayPhoto(p);
+}
+
 function isInPool(
   p: SupabaseProfile,
   swipeHidden: Set<string>,
@@ -56,6 +68,7 @@ function isInPool(
     if (p.suitability_status && p.suitability_status !== 'active') return 'not_active';
     if (isShadowProfile(p)) return 'not_active';
   }
+  if (!hasRequiredClickPhoto(p)) return 'no_photo';
   if (swipeHidden.has(p.user_id)) return 'swiped';
   return null;
 }
