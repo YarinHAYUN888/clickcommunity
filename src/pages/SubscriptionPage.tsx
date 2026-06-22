@@ -15,6 +15,22 @@ function GuestView({ userId }: { userId: string }) {
   const navigate = useNavigate();
   const [modalType, setModalType] = useState<'must_attend' | 'insufficient_votes' | null>(null);
   const [checking, setChecking] = useState(false);
+  const [points, setPoints] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getProfileStats(userId);
+        if (!cancelled) setPoints(Number((s as { points?: number } | null)?.points) || 0);
+      } catch {
+        /* keep 0 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const handleCTA = async () => {
     setChecking(true);
@@ -76,6 +92,9 @@ function GuestView({ userId }: { userId: string }) {
         >
           {checking ? <Loader2 className="animate-spin" size={20} /> : 'הצטרף/י עכשיו'}
         </button>
+
+        {/* Create events at 200 points */}
+        <CreateEventsCard points={points} />
       </div>
 
       {/* Modals */}
