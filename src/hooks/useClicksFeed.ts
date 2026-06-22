@@ -57,9 +57,15 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     setLoading(true);
     setError(null);
 
-    const [{ data, error }, swipeRes] = await Promise.all([
+    const nowIso = new Date().toISOString();
+    const [{ data, error }, swipeRes, boostRes] = await Promise.all([
       supabase.from('profiles').select('*').neq('user_id', currentUserId),
       supabase.from('profile_swipes').select('to_user_id').eq('from_user_id', currentUserId),
+      supabase
+        .from('user_click_actions')
+        .select('user_id')
+        .eq('action_type', 'boost')
+        .gt('expires_at', nowIso),
     ]);
 
     if (error) {
@@ -93,6 +99,29 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
       currentUserId,
     );
 
+    // Bump users with an active boost to the top, preserving existing order within groups.
+    const boostedUserIds = new Set<string>();
+    if (!boostRes.error && boostRes.data) {
+      for (const row of boostRes.data) {
+        if (row.user_id && row.user_id !== currentUserId) boostedUserIds.add(row.user_id);
+      }
+    } else if (boostRes.error && import.meta.env.DEV) {
+      console.warn('[useClicksFeed] user_click_actions unavailable:', boostRes.error.message);
+    }
+
+    const prioritizedItems =
+      boostedUserIds.size > 0
+        ? feedItems
+            .map((item, index) => ({ item, index }))
+            .sort((a, b) => {
+              const aBoost = boostedUserIds.has(a.item.profile.user_id) ? 1 : 0;
+              const bBoost = boostedUserIds.has(b.item.profile.user_id) ? 1 : 0;
+              if (aBoost !== bBoost) return bBoost - aBoost;
+              return a.index - b.index;
+            })
+            .map(({ item }) => item)
+        : feedItems;
+
     if (import.meta.env.DEV) {
       const excludedByEligibility = Object.entries(report.excludedCounts).reduce((acc, [reason, count]) => {
         if (reason === 'tier_no_match') return acc;
@@ -115,7 +144,7 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
       isSuperUser: !!meRef.current?.super_role?.trim(),
     });
 
-    setItems(feedItems);
+    setItems(prioritizedItems);
     setError(null);
     setLoading(false);
   }, [currentUserId, mySignalsKey]);

@@ -103,6 +103,11 @@ Deno.serve(async (req) => {
         male_percent: Math.round((males / total) * 100),
       },
       votes: voteScores,
+      votes_raw: votes.map((v: any) => ({
+        voter_id: v.voter_id,
+        votee_id: v.votee_id,
+        vote: v.vote,
+      })),
       photos: photosRes.data || [],
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

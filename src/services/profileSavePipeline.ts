@@ -252,11 +252,17 @@ export type FinalizeOnboardingResult = {
 
 /**
  * Safe onboarding finale: text first, photos per-slot, never blanket-fail profile on non-photo errors.
+ *
+ * `opts.photosExpected` lets the caller signal that the user selected photos even when
+ * `photoSources` arrived empty (e.g. durable storage could not restore them). In that case we
+ * must NOT mark `profile_completed = true`, so the user is sent to complete their photo instead
+ * of silently finishing without one.
  */
 export async function finalizeOnboardingProfile(
   userId: string,
   data: OnboardingDraft,
   photoSources: string[],
+  opts?: { photosExpected?: boolean },
 ): Promise<FinalizeOnboardingResult> {
   console.log('onboarding start', { userId, photoSourceCount: photoSources.length });
   let photoUrls: string[] = [];
@@ -269,22 +275,28 @@ export async function finalizeOnboardingProfile(
   await ensureCommunityMemberDefaults(userId);
 
   const validPhotoSources = photoSources.filter((s) => typeof s === 'string' && s.length > 0);
+  const photosExpected = opts?.photosExpected === true || validPhotoSources.length > 0;
 
   if (validPhotoSources.length > 0) {
     try {
+      console.log('ONBOARDING IMAGE UPLOAD START', { userId, count: validPhotoSources.length });
       await ensureSessionReadyForStorage(userId);
       const uploadResult = await uploadOnboardingPhotosFromDataUrls(userId, validPhotoSources);
       photoUrls = uploadResult.photoUrls;
       failedSlots = uploadResult.failedSlots;
       partialFailure = uploadResult.partialFailure;
       imageUploadStatus = partialFailure ? 'failed' : 'success';
+      if (partialFailure) {
+        console.error('ONBOARDING IMAGE UPLOAD FAILED', { userId, failedSlots, saved: photoUrls.length });
+      } else {
+        console.log('ONBOARDING IMAGE UPLOAD SUCCESS', { userId, count: photoUrls.length });
+      }
     } catch (e) {
       imageUploadStatus = 'failed';
-      if (e instanceof Error && e.message.startsWith('photo_upload_failed')) {
-        console.error('[finalizeOnboardingProfile] all photos failed — text kept, status failed', e);
-      } else {
-        console.error('[finalizeOnboardingProfile] photo upload failed', e);
-      }
+      console.error('ONBOARDING IMAGE UPLOAD FAILED', {
+        userId,
+        message: e instanceof Error ? e.message : String(e),
+      });
       throw e;
     }
   }
@@ -312,15 +324,22 @@ export async function finalizeOnboardingProfile(
       imageUploadStatus = 'failed';
     } else if (photoPersist === 'success' && !partialFailure) {
       imageUploadStatus = 'success';
+      console.log('ONBOARDING IMAGE URL SAVED', { userId, count: photoUrls.length });
     }
   }
 
   const finalImageStatus: 'pending' | 'success' | 'failed' =
     validPhotoSources.length === 0 ? 'pending' : imageUploadStatus;
 
-  const photosFullySaved =
-    validPhotoSources.length === 0 ||
-    (photoUrls.length === validPhotoSources.length && finalImageStatus === 'success' && !partialFailure);
+  // Completion guard: when photos were expected, only treat them as saved if every
+  // selected photo uploaded successfully. If photos were expected but none arrived
+  // (durable restore failed), photos are NOT fully saved → do not complete the profile.
+  const photosFullySaved = photosExpected
+    ? validPhotoSources.length > 0 &&
+      photoUrls.length === validPhotoSources.length &&
+      finalImageStatus === 'success' &&
+      !partialFailure
+    : true;
 
   const shouldMarkProfileCompleted =
     !profileSyncFailed &&
@@ -347,7 +366,7 @@ export async function finalizeOnboardingProfile(
       console.error('[finalizeOnboardingProfile] profile_completed update failed', completeErr);
       profileSyncFailed = true;
     } else {
-      console.log('PROFILE IMAGE FINAL PROFILE UPDATE SUCCESS', { userId, profile_completed: true });
+      console.log('ONBOARDING PROFILE FINAL SAVE SUCCESS', { userId, profile_completed: true });
     }
   }
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
+import { clearOnboardingDurableState } from '@/lib/onboardingPhotoStore';
 
 export default function BlockedPage() {
   const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function BlockedPage() {
   }, [navigate]);
 
   async function signOut() {
+    await clearOnboardingDurableState();
     await supabase.auth.signOut();
     navigate('/', { replace: true });
   }

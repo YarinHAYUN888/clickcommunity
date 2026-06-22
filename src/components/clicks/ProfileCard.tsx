@@ -168,19 +168,12 @@ export default function ProfileCard({
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 pt-20">
             <div className="flex items-center gap-2">
               <h3 className="text-2xl font-bold text-white" style={{ textShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-                {profile.first_name ? (
-                  <>
-                    <span className="text-gradient-premium" style={{ WebkitTextFillColor: 'transparent' }}>
-                      {profile.first_name.charAt(0)}
-                    </span>
-                    <span>{profile.first_name.slice(1)}</span>
-                  </>
-                ) : 'אנונימי'}
+                {profile.first_name || 'אנונימי'}
                 {age ? `, ${age}` : ''}
               </h3>
             </div>
             {nicheLabel && (
-              <p className="text-white/85 text-[12px] mt-0.5 font-medium">{nicheLabel}</p>
+              <p className="text-primary text-[12px] mt-0.5 font-semibold" style={{ textShadow: '0 1px 4px rgba(0,0,0,0.45)' }}>{nicheLabel}</p>
             )}
             {profile.occupation && (
               <p className="text-white/75 text-[13px] mt-0.5">{profile.occupation}</p>

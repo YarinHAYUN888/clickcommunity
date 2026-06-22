@@ -65,6 +65,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "invalid_action" }), { status: 400, headers: corsHeaders });
     }
 
+    console.log("CLICKS ACTION START", { action, from: userId, to: toUserId });
+
     const { data: meProf, error: meErr } = await supabaseAdmin
       .from("profiles")
       .select("moderation_status, suitability_status, is_shadow, suspended, super_role")
@@ -112,8 +114,12 @@ Deno.serve(async (req) => {
       { onConflict: "from_user_id,to_user_id" },
     );
     if (upsertErr) {
-      console.error("profile_swipes upsert:", upsertErr);
+      console.error("CLICKS ACTION FAILED", { action, reason: "profile_swipes_upsert", message: upsertErr.message });
       return new Response(JSON.stringify({ error: upsertErr.message }), { status: 500, headers: corsHeaders });
+    }
+
+    if (action === "super_like") {
+      console.log("SUPER LIKE SAVED", { from: userId, to: toUserId });
     }
 
     let mutual = false;
@@ -174,13 +180,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    console.log("CLICKS ACTION SUCCESS", { action, mutual });
     return new Response(
       JSON.stringify({ ok: true, mutual, chat_id }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("record-profile-swipe:", err);
+    console.error("CLICKS ACTION FAILED", { reason: "exception", message });
     return new Response(JSON.stringify({ error: message }), { status: 500, headers: corsHeaders });
   }
 });

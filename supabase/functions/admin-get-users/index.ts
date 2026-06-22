@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     let query = supabaseAdmin
       .from("profiles")
       .select(
-        "user_id, first_name, phone, role, status, subscription_status, profile_completion, created_at, suspended, avatar_url, photos, gender, points, referral_code, referral_disabled, referral_cap_override",
+        "user_id, first_name, last_name, phone, role, status, subscription_status, profile_completion, created_at, suspended, avatar_url, photos, gender, points, referral_code, referral_disabled, referral_cap_override, voice_intro_url, voice_intro_duration, voice_intro_status",
         { count: "exact" },
       );
 

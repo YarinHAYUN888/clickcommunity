@@ -17,10 +17,10 @@ function parseSwipeResponse(data: unknown, fnError: unknown): Record<string, unk
 }
 
 function friendlySwipeError(code: string): string {
-  if (code.includes('Shadow isolation')) return 'לא ניתן לבצע פעולה עם משתמש/ת זו.';
-  if (code === 'not_approved' || code === 'target_unavailable') return 'הפרופיל לא זמין לפעולה.';
-  if (code === 'suspended') return 'החשבון מושעה.';
-  return 'לא ניתן לשמור את הפעולה. נסו שוב.';
+  if (code.includes('Shadow isolation')) return 'לא ניתן לבצע פעולה זו כרגע';
+  if (code === 'not_approved' || code === 'target_unavailable') return 'לא ניתן לבצע פעולה זו כרגע';
+  if (code === 'suspended') return 'לא ניתן לבצע פעולה זו כרגע';
+  return 'הפעולה נכשלה. נסה/י שוב';
 }
 
 /** Records like/pass/super_like; on mutual like opens or returns existing DM (server-side). */
@@ -40,5 +40,5 @@ export async function recordProfileSwipe(toUserId: string, action: SwipeAction):
     };
   }
   if (error) throw new Error(friendlySwipeError(error.message));
-  throw new Error('לא ניתן לשמור את הפעולה.');
+  throw new Error('הפעולה נכשלה. נסה/י שוב');
 }

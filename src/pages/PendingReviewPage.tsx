@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
+import { clearOnboardingDurableState } from '@/lib/onboardingPhotoStore';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
@@ -74,6 +75,7 @@ export default function PendingReviewPage() {
   }
 
   async function signOut() {
+    await clearOnboardingDurableState();
     await supabase.auth.signOut();
     navigate('/', { replace: true });
   }

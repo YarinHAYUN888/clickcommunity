@@ -1,6 +1,39 @@
 import { jsonResponse, optionsOk, requireAuthUser } from "../_shared/edgeAuth.ts";
 import { MEMBER_EVENT_MIN_POINTS } from "../_shared/points.ts";
 
+/** Milliseconds offset of Asia/Jerusalem from UTC for a given instant (handles DST). */
+function jerusalemOffsetMs(date: Date): number {
+  const tz = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = tz.formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour") === 24 ? 0 : get("hour"),
+    get("minute"),
+    get("second"),
+  );
+  return asUtc - date.getTime();
+}
+
+/** Convert an event's local (Jerusalem) date + time wall clock to a UTC epoch ms. */
+function jerusalemWallTimeToMs(date: string, time: string): number {
+  const naive = Date.parse(`${date}T${time}`);
+  if (!Number.isFinite(naive)) return NaN;
+  const offset = jerusalemOffsetMs(new Date(naive));
+  return naive - offset;
+}
+
 const sanitizeEventDetails = (raw: Record<string, unknown>) => {
   const allowed = [
     "name",
@@ -63,8 +96,8 @@ Deno.serve(async (req) => {
   if (points < MEMBER_EVENT_MIN_POINTS) {
     return jsonResponse({
       ok: false,
-      error_code: "insufficient_points",
-      message: `נדרשות לפחות ${MEMBER_EVENT_MIN_POINTS} נקודות ליצירת אירוע`,
+      error_code: "not_enough_points",
+      message: "אין לך עדיין מספיק נקודות ליצירת אירוע",
     }, 403);
   }
 
@@ -75,7 +108,13 @@ Deno.serve(async (req) => {
   const locationName = typeof safeDetails.location_name === "string" ? safeDetails.location_name.trim() : "";
 
   if (!name || !date || !time || !locationName) {
-    return jsonResponse({ ok: false, error_code: "missing_fields", message: "יש למלא שם, תאריך, שעה ומיקום" }, 400);
+    return jsonResponse({ ok: false, error_code: "missing_fields", message: "יש למלא את כל השדות הנדרשים" }, 400);
+  }
+
+  // Event start must be in the future (compared in Asia/Jerusalem local wall time).
+  const startMs = jerusalemWallTimeToMs(date, time);
+  if (!Number.isFinite(startMs) || startMs <= Date.now()) {
+    return jsonResponse({ ok: false, error_code: "event_in_past", message: "תאריך האירוע חייב להיות בעתיד" }, 400);
   }
 
   const rawCapacity = Number(safeDetails.max_capacity);
@@ -104,7 +143,7 @@ Deno.serve(async (req) => {
     reserved_new_spots,
     gender_balance_target: 0.5,
     requires_subscription: false,
-    status: "open" as const,
+    status: "pending_review" as const,
     host_id: userId,
     created_by: userId,
   };
@@ -119,5 +158,5 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error_code: "server_error", message: insertErr.message }, 500);
   }
 
-  return jsonResponse({ ok: true, event });
+  return jsonResponse({ ok: true, event_id: event?.id, event, message: "האירוע נשלח לאישור" });
 });

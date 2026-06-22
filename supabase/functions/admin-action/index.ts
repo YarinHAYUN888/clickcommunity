@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
       }
       if ("status" in next && typeof next.status === "string") {
         const s = next.status.trim();
-        if (!["open", "almost_full", "full", "past", "cancelled"].includes(s)) {
+        if (!["open", "almost_full", "full", "past", "cancelled", "pending_review", "rejected"].includes(s)) {
           delete next.status;
         }
       }
@@ -170,6 +170,26 @@ Deno.serve(async (req) => {
       case "update_user_status": {
         await supabaseAdmin.from("profiles").update({ status: details.new_status }).eq("user_id", target_id);
         return respond({ updated: "status" });
+      }
+      case "update_user_profile": {
+        if (!target_id) return respondErr("target_id required");
+        const updates: Record<string, unknown> = {};
+        if (details && "last_name" in details) {
+          const ln = typeof details.last_name === "string" ? details.last_name.trim() : "";
+          updates.last_name = ln.length > 0 ? ln : null;
+        }
+        if (details && "first_name" in details) {
+          const fn = typeof details.first_name === "string" ? details.first_name.trim() : "";
+          if (fn.length > 0) updates.first_name = fn;
+        }
+        if (Object.keys(updates).length === 0) return respondErr("no profile fields to update");
+        updates.updated_at = new Date().toISOString();
+        const { error: profileErr } = await supabaseAdmin
+          .from("profiles")
+          .update(updates)
+          .eq("user_id", target_id);
+        if (profileErr) return respondErr(profileErr.message, 500);
+        return respond({ updated: "profile" });
       }
       case "suspend_user": {
         await supabaseAdmin.from("profiles").update({
@@ -275,6 +295,32 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from("events").update({ status: "cancelled" }).eq("id", target_id);
         return respond({});
       }
+      case "approve_event": {
+        if (!target_id) return respondErr("target_id required");
+        const { data: ev, error: approveEventErr } = await supabaseAdmin
+          .from("events")
+          .update({ status: "open", updated_at: new Date().toISOString() })
+          .eq("id", target_id)
+          .eq("status", "pending_review")
+          .select("id, status")
+          .maybeSingle();
+        if (approveEventErr) return respondErr(approveEventErr.message, 500);
+        if (!ev) return respondErr("event not pending or not found", 404);
+        return respond({ updated: "event", status: "open" });
+      }
+      case "reject_event": {
+        if (!target_id) return respondErr("target_id required");
+        const { data: ev, error: rejectEventErr } = await supabaseAdmin
+          .from("events")
+          .update({ status: "rejected", updated_at: new Date().toISOString() })
+          .eq("id", target_id)
+          .eq("status", "pending_review")
+          .select("id, status")
+          .maybeSingle();
+        if (rejectEventErr) return respondErr(rejectEventErr.message, 500);
+        if (!ev) return respondErr("event not pending or not found", 404);
+        return respond({ updated: "event", status: "rejected" });
+      }
       case "delete_event": {
         const { data: eventChats, error: eventChatsErr } = await supabaseAdmin
           .from("chats")
@@ -310,6 +356,30 @@ Deno.serve(async (req) => {
         if (remainingEvent) return respondErr("Event deletion was not completed", 500);
 
         return respond({});
+      }
+      case "upsert_event_click_feedback": {
+        const eventId = target_id;
+        const reporterId = typeof details?.reporter_user_id === "string" ? details.reporter_user_id : "";
+        const targetUserId = typeof details?.target_user_id === "string" ? details.target_user_id : "";
+        if (!eventId || !reporterId || !targetUserId) {
+          return respondErr("event id, reporter_user_id and target_user_id are required");
+        }
+        if (reporterId === targetUserId) return respondErr("reporter and target must differ");
+        if (typeof details?.had_click !== "boolean") return respondErr("had_click (boolean) required");
+        const vote = details.had_click ? "clicked" : "no_click";
+        const { error: feedbackErr } = await supabaseAdmin
+          .from("event_votes")
+          .upsert(
+            {
+              event_id: eventId,
+              voter_id: reporterId,
+              votee_id: targetUserId,
+              vote,
+            },
+            { onConflict: "event_id,voter_id,votee_id" },
+          );
+        if (feedbackErr) return respondErr(feedbackErr.message, 500);
+        return respond({ updated: "event_click_feedback", vote });
       }
       case "approve_registration": {
         await supabaseAdmin.from("event_registrations").update({ status: "approved" }).eq("id", target_id);

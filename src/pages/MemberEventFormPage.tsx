@@ -49,11 +49,16 @@ export default function MemberEventFormPage() {
     const time = form.time.trim();
     const locationName = form.location_name.trim();
     if (!name || !date || !time || !locationName) {
-      toast.error('יש למלא שם, תאריך, שעה ומיקום');
+      toast.error('יש למלא את כל השדות הנדרשים');
+      return;
+    }
+    const startMs = new Date(`${date}T${time}`).getTime();
+    if (!Number.isFinite(startMs) || startMs <= Date.now()) {
+      toast.error('תאריך האירוע חייב להיות בעתיד');
       return;
     }
     if (!canCreate) {
-      toast.error(`נדרשות לפחות ${MEMBER_EVENT_MIN_POINTS} נקודות ליצירת אירוע`);
+      toast.error('אין לך עדיין מספיק נקודות ליצירת אירוע');
       return;
     }
 
@@ -61,7 +66,7 @@ export default function MemberEventFormPage() {
     try {
       const maxCapacity = Math.min(30, Math.max(5, Math.round(form.max_capacity) || 15));
       const reservedNewSpots = Math.min(5, Math.max(0, Math.round(form.reserved_new_spots) || 0));
-      const event = await createMemberEvent({
+      const result = await createMemberEvent({
         name,
         date,
         time,
@@ -71,8 +76,8 @@ export default function MemberEventFormPage() {
         max_capacity: maxCapacity,
         reserved_new_spots: reservedNewSpots,
       });
-      toast.success('האירוע נוצר!');
-      navigate(`/events/${event.id}`);
+      toast.success(result.message || 'האירוע נשלח לאישור');
+      navigate('/events');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'יצירת אירוע נכשלה');
     } finally {
@@ -101,7 +106,7 @@ export default function MemberEventFormPage() {
           <h1 className="text-xl text-h1-premium text-foreground">יצירת אירוע</h1>
         </div>
         <p className="text-xs text-muted-foreground mt-2 px-1">
-          אירוע פרטי עם עד {form.max_capacity} משתתפים · פתוח לקהילה
+          אירוע עם עד {form.max_capacity} משתתפים · יישלח לאישור צוות לפני פרסום
         </p>
       </div>
 
@@ -179,14 +184,24 @@ export default function MemberEventFormPage() {
           />
         </label>
 
-        <PremiumButton
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          className="w-full"
-        >
-          {saving ? 'יוצר אירוע…' : 'פרסום האירוע'}
-        </PremiumButton>
+        <div className="space-y-2.5">
+          <PremiumButton
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="w-full"
+          >
+            {saving ? 'שולח לאישור…' : 'שליחת אירוע לאישור'}
+          </PremiumButton>
+          <button
+            type="button"
+            onClick={() => navigate('/events')}
+            disabled={saving}
+            className="w-full h-11 rounded-2xl border border-border/60 text-sm font-medium text-muted-foreground active:scale-[0.98] transition-transform disabled:opacity-50"
+          >
+            ביטול
+          </button>
+        </div>
       </div>
 
       {saving && <SpinnerOverlay />}

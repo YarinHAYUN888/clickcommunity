@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import AnimatedBackground from '@/components/ui/AnimatedBackground';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
+import { clearOnboardingDurableState } from '@/lib/onboardingPhotoStore';
 import { UserRoundPen } from 'lucide-react';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { SpinnerOverlay } from '@/components/ui/luma-spin';
@@ -69,6 +70,7 @@ export default function CompleteProfilePage() {
           <button
             type="button"
             onClick={async () => {
+              await clearOnboardingDurableState();
               await supabase.auth.signOut();
               navigate('/', { replace: true });
             }}

@@ -5,6 +5,7 @@ import { SpinnerOverlay } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import InterestPill from '@/components/clicks/InterestPill';
 import { supabase } from '@/integrations/supabase/client';
+import { clearOnboardingDurableState } from '@/lib/onboardingPhotoStore';
 import { getMyProfile, getProfileStats } from '@/services/profile';
 import { motion } from 'framer-motion';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
@@ -321,6 +322,7 @@ export default function ProfilePage() {
         {/* Logout */}
         <button
           onClick={async () => {
+            await clearOnboardingDurableState();
             await supabase.auth.signOut();
             navigate('/');
           }}

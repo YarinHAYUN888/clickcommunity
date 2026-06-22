@@ -34,6 +34,10 @@ verify_jwt = true
 [functions.record-profile-swipe]
 verify_jwt = true
 
+# Boost / generic click actions; authenticated members only
+[functions.record-click-action]
+verify_jwt = true
+
 [functions.analyze-profile-personality]
 verify_jwt = true
 

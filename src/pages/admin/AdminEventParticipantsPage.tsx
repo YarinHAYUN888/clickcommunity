@@ -24,6 +24,10 @@ export default function AdminEventParticipantsPage() {
   const [entryCode, setEntryCode] = useState('');
   const [eventName, setEventName] = useState('');
   const [rows, setRows] = useState<any[]>([]);
+  const [eventStatus, setEventStatus] = useState<string>('');
+  const [votesRaw, setVotesRaw] = useState<{ voter_id: string; votee_id: string; vote: string }[]>([]);
+  const [voteScores, setVoteScores] = useState<any[]>([]);
+  const [reporterId, setReporterId] = useState<string>('');
 
   const load = async () => {
     if (!eventId) return;
@@ -31,7 +35,10 @@ export default function AdminEventParticipantsPage() {
     try {
       const data = await getAdminEventDetails(eventId);
       setEventName(data?.event?.name || '');
+      setEventStatus(data?.event?.status || '');
       setRows(data?.registrations || []);
+      setVotesRaw(data?.votes_raw || []);
+      setVoteScores(data?.votes || []);
     } catch {
       toast.error('שגיאה בטעינת משתתפים');
     } finally {
@@ -52,6 +59,44 @@ export default function AdminEventParticipantsPage() {
     if (filter === 'all') return rows;
     return rows.filter((r) => r.status === filter);
   }, [rows, filter]);
+
+  const attendees = useMemo(
+    () => rows.filter((r) => ['registered', 'approved', 'checked_in'].includes(r.status)),
+    [rows],
+  );
+
+  const voteByPair = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const v of votesRaw) map[`${v.voter_id}|${v.votee_id}`] = v.vote;
+    return map;
+  }, [votesRaw]);
+
+  const scoreByUser = useMemo(() => {
+    const map: Record<string, { positive: number; negative: number }> = {};
+    for (const s of voteScores) {
+      const uid = s?.votee?.user_id;
+      if (uid) map[uid] = { positive: s.positive ?? 0, negative: s.negative ?? 0 };
+    }
+    return map;
+  }, [voteScores]);
+
+  const markFeedback = async (targetUserId: string, hadClick: boolean) => {
+    if (!eventId || !reporterId) return;
+    setSaving(true);
+    try {
+      await performAdminAction('upsert_event_click_feedback', 'event', eventId, {
+        reporter_user_id: reporterId,
+        target_user_id: targetUserId,
+        had_click: hadClick,
+      });
+      toast.success('המשוב נשמר');
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'שמירת המשוב נכשלה');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const fmt = (value?: string | null) => {
     if (!value) return '—';
@@ -173,6 +218,75 @@ export default function AdminEventParticipantsPage() {
             </tbody>
           </table>
         </div>
+
+        {eventStatus === 'past' && (
+          <GlassCard variant="strong" className="p-4 mt-6 space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-foreground">משוב קליקים לאחר האירוע</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                סמנ/י עבור משתתף/ת מדווח/ת אם היה קליק עם שאר המשתתפים/ות.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">משתתף/ת מדווח/ת</label>
+              <select
+                value={reporterId}
+                onChange={(e) => setReporterId(e.target.value)}
+                className="w-full h-10 rounded-xl border border-border bg-background px-3 text-sm"
+              >
+                <option value="">בחר/י משתתף/ת…</option>
+                {attendees.map((r) => (
+                  <option key={r.user_id} value={r.user_id}>
+                    {r.user?.first_name || r.user_id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {reporterId && (
+              <div className="space-y-2">
+                {attendees
+                  .filter((r) => r.user_id !== reporterId)
+                  .map((r) => {
+                    const current = voteByPair[`${reporterId}|${r.user_id}`];
+                    const counts = scoreByUser[r.user_id] || { positive: 0, negative: 0 };
+                    return (
+                      <div
+                        key={r.user_id}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-border/40 bg-muted/20 p-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{r.user?.first_name || r.user_id}</p>
+                          <p className="text-[11px] text-muted-foreground">💜 {counts.positive} · 👎 {counts.negative}</p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={() => markFeedback(r.user_id, true)}
+                            disabled={saving}
+                            className={`h-8 px-3 rounded-full text-xs font-semibold ${
+                              current === 'clicked' ? 'bg-success text-primary-foreground' : 'bg-success/10 text-success'
+                            } disabled:opacity-50`}
+                          >
+                            היה קליק
+                          </button>
+                          <button
+                            onClick={() => markFeedback(r.user_id, false)}
+                            disabled={saving}
+                            className={`h-8 px-3 rounded-full text-xs font-semibold ${
+                              current === 'no_click' ? 'bg-destructive text-primary-foreground' : 'bg-destructive/10 text-destructive'
+                            } disabled:opacity-50`}
+                          >
+                            לא היה קליק
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </GlassCard>
+        )}
       </div>
     </div>
   );

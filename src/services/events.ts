@@ -20,7 +20,7 @@ export interface EventRow {
   reserved_new_spots: number;
   requires_subscription: boolean;
   gender_balance_target: number;
-  status: 'open' | 'almost_full' | 'full' | 'past' | 'cancelled';
+  status: 'open' | 'almost_full' | 'full' | 'past' | 'cancelled' | 'pending_review' | 'rejected';
   is_past_voting_open: boolean;
   created_at: string;
   updated_at: string;
@@ -30,6 +30,21 @@ export interface EventStats {
   total: number;
   femalePercent: number;
   malePercent: number;
+}
+
+/**
+ * Returns true when an event can no longer be registered for:
+ * its status is past/cancelled, or its start datetime (date + time) has passed.
+ * The schema has no end time, so the start datetime is used as the cutoff.
+ */
+export function isEventRegistrationClosed(
+  event: Pick<EventRow, 'status' | 'date' | 'time'>,
+): boolean {
+  if (event.status === 'past' || event.status === 'cancelled') return true;
+  if (!event.date || !event.time) return false;
+  const start = new Date(`${event.date}T${event.time}`).getTime();
+  if (!Number.isFinite(start)) return false;
+  return start <= Date.now();
 }
 
 export interface EventRegistration {
@@ -692,6 +707,8 @@ export function mapEventRegistrationErrorMessage(
       return 'לא הצלחנו לאמת מנוי כרגע. נסו שוב בעוד רגע';
     case 'monthly_event_limit_reached':
       return typeof body?.message === 'string' ? body.message : 'הגעת למכסה החודשית לאירועים';
+    case 'event_closed':
+      return 'ההרשמה לאירוע הסתיימה';
     case 'user_not_allowed':
       return 'אין אפשרות להירשם לאירוע זה';
     case 'event_not_found':
@@ -814,7 +831,14 @@ export type MemberEventCreatePayload = {
   reserved_new_spots?: number;
 };
 
-export async function createMemberEvent(payload: MemberEventCreatePayload): Promise<EventRow> {
+export type MemberEventCreateResult = {
+  eventId: string | null;
+  message: string;
+};
+
+export async function createMemberEvent(
+  payload: MemberEventCreatePayload,
+): Promise<MemberEventCreateResult> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) throw new Error('Not authenticated');
 
@@ -829,8 +853,18 @@ export async function createMemberEvent(payload: MemberEventCreatePayload): Prom
     throw new Error(message);
   }
 
-  if (body?.ok === true && body.event && typeof body.event === 'object') {
-    return body.event as EventRow;
+  if (body?.ok === true) {
+    const eventId =
+      typeof body.event_id === 'string'
+        ? body.event_id
+        : body.event && typeof body.event === 'object'
+          ? ((body.event as { id?: string }).id ?? null)
+          : null;
+    const message =
+      typeof body.message === 'string' && body.message.trim()
+        ? body.message
+        : 'האירוע נשלח לאישור';
+    return { eventId, message };
   }
 
   if (error) throw new Error(error.message || 'יצירת אירוע נכשלה');

@@ -38,6 +38,7 @@ import {
 } from '@/services/completeOnboardingAuth';
 import { compressDataUrlForUpload } from '@/services/profile';
 import { finalizeOnboardingProfile, type OnboardingDraft } from '@/services/profileSavePipeline';
+import { loadOnboardingPhotos } from '@/lib/onboardingPhotoStore';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
 type Step = typeof steps[number];
@@ -474,6 +475,29 @@ function BasicsStep({ data, updateData, onNext }: { data: any; updateData: any; 
 }
 
 // ---- STEP 3: Photos ----
+const ONBOARDING_PHOTO_SLOTS = 5; // matches MAX_ONBOARDING_UPLOADS in services/profile.ts
+const UNSUPPORTED_IMAGE_MESSAGE = 'סוג הקובץ לא נתמך. יש להעלות תמונה בפורמט JPG, PNG או WEBP';
+// JPG/PNG/WEBP are uploaded as-is; HEIC/HEIF are auto-converted to JPEG by the upload pipeline.
+const ALLOWED_IMAGE_MIME = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+const ALLOWED_IMAGE_EXT = /\.(jpe?g|png|webp|heic|heif)$/i;
+
+function isAllowedOnboardingImage(file: File): boolean {
+  const type = (file.type || '').toLowerCase();
+  if (type && ALLOWED_IMAGE_MIME.has(type)) return true;
+  // Some browsers (iOS Safari) report HEIC with an empty or generic type.
+  if (!type || type === 'application/octet-stream') {
+    return ALLOWED_IMAGE_EXT.test(file.name || '');
+  }
+  return false;
+}
+
 function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; onNext: () => void }) {
   const { photosDraftRef } = useOnboarding();
   const [photos, setPhotos] = useState<(string | null)[]>(() => {
@@ -481,8 +505,8 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
       photosDraftRef.current.length > 0
         ? photosDraftRef.current
         : (data.photos?.length ? data.photos : []);
-    const arr = Array(6).fill(null);
-    saved.forEach((p: string, i: number) => { if (i < 6) arr[i] = p; });
+    const arr = Array(ONBOARDING_PHOTO_SLOTS).fill(null);
+    saved.forEach((p: string, i: number) => { if (i < ONBOARDING_PHOTO_SLOTS) arr[i] = p; });
     return arr;
   });
   const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -490,7 +514,22 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
 
   const handleSelect = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const input = e.target;
     if (!file) return;
+
+    if (file.size === 0) {
+      toast.error('הקובץ ריק או פגום. נסה/י קובץ אחר.');
+      input.value = '';
+      return;
+    }
+    if (!isAllowedOnboardingImage(file)) {
+      toast.error(UNSUPPORTED_IMAGE_MESSAGE);
+      input.value = '';
+      return;
+    }
+
+    console.log('ONBOARDING IMAGE SELECTED', { index, type: file.type || 'unknown', size: file.size });
+
     const reader = new FileReader();
     reader.onload = async () => {
       const raw = reader.result as string;
@@ -501,7 +540,11 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
         return next;
       });
     };
+    reader.onerror = () => {
+      toast.error('טעינת התמונה נכשלה. נסה/י שוב');
+    };
     reader.readAsDataURL(file);
+    input.value = '';
   };
 
   const removePhoto = (index: number) => {
@@ -519,11 +562,11 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
     <div className="space-y-6">
       <div>
         <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">הוסף/י תמונות</h2>
-        <p className="text-[15px] text-muted-foreground mt-2">בין 1-6 תמונות. התמונה הראשונה היא התמונה הראשית</p>
+        <p className="text-[15px] text-muted-foreground mt-2">בין 1-5 תמונות. התמונה הראשונה היא התמונה הראשית</p>
       </div>
       <div className="grid grid-cols-2 gap-3" style={{ direction: 'rtl' }}>
         <PhotoSlot index={0} photo={photos[0]} isPrimary fileRef={el => (fileRefs.current[0] = el)} onSelect={e => handleSelect(0, e)} onRemove={() => removePhoto(0)} className="row-span-2" />
-        {[1, 2, 3, 4, 5].map(i => (
+        {[1, 2, 3, 4].map(i => (
           <PhotoSlot key={i} index={i} photo={photos[i]} fileRef={el => (fileRefs.current[i] = el)} onSelect={e => handleSelect(i, e)} onRemove={() => removePhoto(i)} />
         ))}
       </div>
@@ -889,7 +932,8 @@ function onboardingPhotosIncomplete(
 
 function VerifyStep({ data, updateData, clearData }: { data: any; updateData: any; clearData: () => void }) {
   const navigate = useNavigate();
-  const { voiceIntroDraftRef, photosDraftRef, getPassword } = useOnboarding();
+  const { voiceIntroDraftRef, photosDraftRef, getPassword, getOnboardingSessionId, getExpectedPhotoCount } =
+    useOnboarding();
   const registrationSessionIdRef = useRef(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()),
   );
@@ -940,18 +984,36 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       } = await supabase.auth.getSession();
       if (!session?.user || cancelled) return;
 
-      const photoSources = photosDraftRef.current.filter((u) => typeof u === 'string' && u.length > 0);
+      let photoSources = photosDraftRef.current.filter((u) => typeof u === 'string' && u.length > 0);
+      if (photoSources.length === 0) {
+        try {
+          const record = await loadOnboardingPhotos(getOnboardingSessionId());
+          if (record && record.photos.length > 0) {
+            photoSources = record.photos;
+            photosDraftRef.current = record.photos;
+          }
+        } catch {
+          /* ignore durable restore */
+        }
+      }
+      if (cancelled) return;
 
-      if (photoSources.length > 0) {
+      const photosExpected = photoSources.length > 0 || getExpectedPhotoCount() > 0;
+
+      if (photoSources.length > 0 || photosExpected) {
         try {
           const saved = localStorage.getItem('clicks_onboarding');
-          if (saved) {
-            const parsed = JSON.parse(saved) as Record<string, unknown>;
-            const draft = onboardingDataToDraft(parsed);
-            await finalizeOnboardingProfile(session.user.id, draft, photoSources);
-          }
+          const parsed = saved ? (JSON.parse(saved) as Record<string, unknown>) : {};
+          const draft = onboardingDataToDraft(parsed);
+          await finalizeOnboardingProfile(session.user.id, draft, photoSources, { photosExpected });
         } catch (e) {
           console.warn('[VerifyStep] session restore finalize skipped', e);
+          return;
+        }
+        // Completion guard: photos were expected but none could be restored — do not
+        // silently route forward as complete; let the user re-add a photo.
+        if (photosExpected && photoSources.length === 0) {
+          if (!cancelled) toast.error('טעינת התמונה נכשלה. נסה/י שוב');
           return;
         }
       }
@@ -1005,24 +1067,38 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     return () => clearInterval(interval);
   }, [codeSent, resendTimer]);
 
-  const buildPostOtpInputs = useCallback(() => {
+  const buildPostOtpInputs = useCallback(async () => {
     const password = getPassword().trim();
     const email = data.email?.trim().toLowerCase();
     if (!password || !email) {
       throw new Error('missing_credentials');
     }
-    const onboardingPhotos =
+    let onboardingPhotos =
       photosDraftRef.current.length > 0
         ? photosDraftRef.current
         : (data.photos ?? []).filter((u: unknown) => typeof u === 'string' && u.length > 0);
+    // Durable fallback: a refresh / app-switch during OTP can clear in-memory photos.
+    if (onboardingPhotos.length === 0) {
+      try {
+        const record = await loadOnboardingPhotos(getOnboardingSessionId());
+        if (record && record.photos.length > 0) {
+          onboardingPhotos = record.photos;
+          photosDraftRef.current = record.photos;
+        }
+      } catch {
+        /* ignore durable restore */
+      }
+    }
+    const photosExpected = onboardingPhotos.length > 0 || getExpectedPhotoCount() > 0;
     const draft = onboardingDataToDraft(data as Record<string, unknown>);
     return {
       password,
       email,
       onboardingPhotos,
+      photosExpected,
       draft,
     };
-  }, [data, photosDraftRef, getPassword]);
+  }, [data, photosDraftRef, getPassword, getOnboardingSessionId, getExpectedPhotoCount]);
 
   const applyOtpIssueSuccess = useCallback(
     (result: IssueOtpResult) => {
@@ -1143,7 +1219,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       setPostAuthBusy(true);
       otpFinalizeInFlightRef.current = true;
 
-      const { password, email, onboardingPhotos, draft } = buildPostOtpInputs();
+      const { password, email, onboardingPhotos, photosExpected, draft } = await buildPostOtpInputs();
 
       const result = await runPostOtpRegistration({
         registrationBody: {
@@ -1169,6 +1245,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         },
         draft,
         photoSources: onboardingPhotos,
+        photosExpected,
         voiceBlob: voiceIntroDraftRef.current,
         analysisPayload: {
           firstName: data.firstName,
@@ -1197,6 +1274,12 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         setPostAuthBusy(false);
         return;
       }
+      // Photos were selected but could not be restored/uploaded — do not show fake success.
+      if (photosExpected && onboardingPhotos.length === 0) {
+        toast.error('טעינת התמונה נכשלה. נסה/י שוב');
+        setPostAuthBusy(false);
+        return;
+      }
       if (onboardingPhotosIncomplete(onboardingPhotos.length, result)) {
         toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
         setPostAuthBusy(false);
@@ -1215,7 +1298,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
       let onboardingPhotos: string[] = [];
       try {
-        const { password, email, onboardingPhotos: photos, draft } = buildPostOtpInputs();
+        const { password, email, onboardingPhotos: photos, photosExpected, draft } =
+          await buildPostOtpInputs();
         onboardingPhotos = photos;
 
         const recovery = await tryRecoverSessionAfterFailure(
@@ -1224,6 +1308,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
           email,
           password,
           lastRegistrationCodeRef.current,
+          photosExpected,
         );
         if (recovery.recovered) {
           if (onboardingPhotosIncomplete(onboardingPhotos.length, recovery)) {

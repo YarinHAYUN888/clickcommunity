@@ -5,6 +5,7 @@ import { ArrowRight, Search, Loader2, X, User } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import PointsAdjustModal from '@/components/admin/PointsAdjustModal';
+import { VoiceIntroReviewPlayer } from '@/components/admin/VoiceIntroReviewPlayer';
 import { useAdmin } from '@/contexts/AdminContext';
 import { getAdminUsers, performAdminAction } from '@/services/admin';
 import { supabase } from '@/integrations/supabase/client';
@@ -46,6 +47,8 @@ export default function AdminUsersPage() {
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const [ledger, setLedger] = useState<any[]>([]);
   const [capDraft, setCapDraft] = useState('');
+  const [lastNameDraft, setLastNameDraft] = useState('');
+  const [savingLastName, setSavingLastName] = useState(false);
 
   const fetchUsers = useCallback(async (): Promise<any[]> => {
     setLoading(true);
@@ -77,6 +80,7 @@ export default function AdminUsersPage() {
   useEffect(() => {
     if (!selectedUser) return;
     setCapDraft(selectedUser.referral_cap_override != null ? String(selectedUser.referral_cap_override) : '');
+    setLastNameDraft(selectedUser.last_name ?? '');
     (async () => {
       const { data, error } = await supabase
         .from('points_history')
@@ -134,6 +138,28 @@ export default function AdminUsersPage() {
       toast.error(message);
     }
     setActionLoading(false);
+  };
+
+  const handleSaveLastName = async () => {
+    if (!selectedUser) return;
+    setSavingLastName(true);
+    try {
+      const result = (await performAdminAction('update_user_profile', 'user', selectedUser.user_id, {
+        last_name: lastNameDraft,
+      })) as { error?: string };
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success('שם המשפחה נשמר ✓');
+      const refreshedUsers = await fetchUsers();
+      const fresh = refreshedUsers.find((u) => u.user_id === selectedUser.user_id);
+      if (fresh) setSelectedUser(fresh);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'שגיאה בשמירת שם המשפחה';
+      toast.error(message);
+    }
+    setSavingLastName(false);
   };
 
   return (
@@ -259,6 +285,41 @@ export default function AdminUsersPage() {
                   <div className="text-muted-foreground">פרופיל: <span className="text-foreground font-medium">{selectedUser.profile_completion || 0}%</span></div>
                   <div className="text-muted-foreground">אירועים: <span className="text-foreground font-medium">{selectedUser.events_attended}</span></div>
                   <div className="text-muted-foreground col-span-2">נקודות: <span className="text-foreground font-medium">{selectedUser.points ?? 0}</span></div>
+                </div>
+
+                {/* Last name editing */}
+                <div className="space-y-2 pt-1">
+                  <h4 className="text-sm font-semibold text-muted-foreground">שם משפחה</h4>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="שם משפחה"
+                      value={lastNameDraft}
+                      onChange={(e) => setLastNameDraft(e.target.value)}
+                      className="flex-1 h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveLastName}
+                      disabled={savingLastName || (lastNameDraft.trim() === (selectedUser.last_name ?? '').trim())}
+                      className="h-10 px-4 rounded-xl border border-primary text-primary text-xs font-medium whitespace-nowrap disabled:opacity-50 flex items-center justify-center"
+                    >
+                      {savingLastName ? <Loader2 className="animate-spin" size={16} /> : 'שמור'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Onboarding recording */}
+                <div className="space-y-2 pt-1">
+                  <h4 className="text-sm font-semibold text-muted-foreground">הקלטת הרשמה</h4>
+                  {selectedUser.voice_intro_url ? (
+                    <VoiceIntroReviewPlayer
+                      objectPath={selectedUser.voice_intro_url}
+                      durationSeconds={selectedUser.voice_intro_duration ?? null}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">לא קיימת הקלטה למשתמש זה</p>
+                  )}
                 </div>
 
                 {/* Management */}

@@ -13,6 +13,37 @@ function jerusalemYearMonth(d: Date): string {
   }).format(d);
 }
 
+/** Milliseconds between a UTC instant and how Asia/Jerusalem renders it. */
+function jerusalemOffsetMs(date: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = dtf.formatToParts(date);
+  const map: Record<string, number> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") map[p.type] = Number(p.value);
+  }
+  const asUtc = Date.UTC(map.year, map.month - 1, map.day, map.hour === 24 ? 0 : map.hour, map.minute, map.second);
+  return asUtc - date.getTime();
+}
+
+/** Converts an Asia/Jerusalem wall-clock date+time to a UTC epoch (ms). */
+function jerusalemWallTimeToMs(date: string, time: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm, ss] = time.split(":").map(Number);
+  if (!y || !m || !d || Number.isNaN(hh)) return NaN;
+  const naiveUtc = Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0);
+  const offset = jerusalemOffsetMs(new Date(naiveUtc));
+  return naiveUtc - offset;
+}
+
 function countRegsInCurrentJerusalemMonth(rows: { created_at: string }[]): number {
   const ym = jerusalemYearMonth(new Date());
   let n = 0;
@@ -102,9 +133,21 @@ Deno.serve(async (req) => {
     if (event.status === "past" || event.status === "cancelled") {
       return jsonResponse({
         ok: false,
-        error_code: "user_not_allowed",
-        message: "האירוע אינו פתוח להרשמה",
+        error_code: "event_closed",
+        message: "ההרשמה לאירוע הסתיימה",
       });
+    }
+
+    // Block registration once the event start datetime has passed (no end-time column in schema).
+    if (event.date && event.time) {
+      const startMs = jerusalemWallTimeToMs(String(event.date), String(event.time));
+      if (Number.isFinite(startMs) && startMs <= Date.now()) {
+        return jsonResponse({
+          ok: false,
+          error_code: "event_closed",
+          message: "ההרשמה לאירוע הסתיימה",
+        });
+      }
     }
 
     const { data: profile, error: profileError } = await admin

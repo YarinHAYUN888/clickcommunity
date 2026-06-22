@@ -148,6 +148,8 @@ export type RunPostOtpOptions = {
   registrationBody: CompleteRegistrationBody;
   draft: OnboardingDraft;
   photoSources: string[];
+  /** True when the user selected photos, even if photoSources arrived empty (durable restore failed). */
+  photosExpected?: boolean;
   voiceBlob: VoiceIntroDraft;
   analysisPayload: Parameters<typeof runUserAnalysis>[0];
   referralCode?: string;
@@ -156,8 +158,15 @@ export type RunPostOtpOptions = {
 export async function runPostOtpRegistration(
   opts: RunPostOtpOptions,
 ): Promise<PostOtpRegistrationResult> {
-  const { registrationBody, draft, photoSources, voiceBlob, analysisPayload, referralCode } =
-    opts;
+  const {
+    registrationBody,
+    draft,
+    photoSources,
+    photosExpected,
+    voiceBlob,
+    analysisPayload,
+    referralCode,
+  } = opts;
 
   const email = registrationBody.email;
   const password = registrationBody.password;
@@ -191,7 +200,9 @@ export async function runPostOtpRegistration(
   let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
 
   try {
-    const finalized = await finalizeOnboardingProfile(userId, draft, photoSources);
+    const finalized = await finalizeOnboardingProfile(userId, draft, photoSources, {
+      photosExpected,
+    });
     profileSyncFailed = finalized.profileSyncFailed;
     photoUrls = finalized.photoUrls;
     failedSlots = finalized.failedSlots;
@@ -269,6 +280,7 @@ export async function tryRecoverSessionAfterFailure(
   email: string,
   password: string,
   _registrationCode?: 'created' | 'already_exists',
+  photosExpected?: boolean,
 ): Promise<
   | {
       recovered: true;
@@ -292,7 +304,9 @@ export async function tryRecoverSessionAfterFailure(
     let partialFailure = false;
     let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
     try {
-      const r = await finalizeOnboardingProfile(session.user.id, draft, photoSources);
+      const r = await finalizeOnboardingProfile(session.user.id, draft, photoSources, {
+        photosExpected,
+      });
       profileSyncFailed = r.profileSyncFailed;
       photoUrls = r.photoUrls;
       partialFailure = r.partialFailure;
@@ -325,7 +339,9 @@ export async function tryRecoverSessionAfterFailure(
       let partialFailure = false;
       let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
       try {
-        const r = await finalizeOnboardingProfile(signInData.user.id, draft, photoSources);
+        const r = await finalizeOnboardingProfile(signInData.user.id, draft, photoSources, {
+          photosExpected,
+        });
         profileSyncFailed = r.profileSyncFailed;
         photoUrls = r.photoUrls;
         partialFailure = r.partialFailure;

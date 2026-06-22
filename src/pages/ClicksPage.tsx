@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Sparkles, Zap } from 'lucide-react';
+import { Heart, Sparkles, Zap, Rocket } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
 import ProfileCard from '@/components/clicks/ProfileCard';
 import ClicksFeedSkeleton from '@/components/clicks/ClicksFeedSkeleton';
@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
 import { CHAT_UNREAD_REFRESH_EVENT, notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
 import { recordProfileSwipe, SwipeAction } from '@/services/clicksSwipe';
+import { recordBoost } from '@/services/clickActions';
 import { toast } from 'sonner';
 
 export default function ClicksPage() {
@@ -36,6 +37,7 @@ export default function ClicksPage() {
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
 
   const feedRef = useRef<HTMLDivElement>(null);
+  const [boosting, setBoosting] = useState(false);
 
   // Icebreaker state
   const [icebreakerOpen, setIcebreakerOpen] = useState(false);
@@ -102,16 +104,12 @@ export default function ClicksPage() {
           } else {
             toast.error('נוצרה התאמה אך לא נמצא צ׳אט. נסו שוב או פתחו הודעה מהרשימה.');
           }
-        } else if (action === 'pass') {
-          toast('נרשם דילוג');
-        } else if (action === 'super_like') {
-          toast('נרשם סופר־לייק');
         } else {
-          toast('נרשם לייק');
+          toast.success('בוצע בהצלחה');
         }
         await (tab === 'general' ? refresh() : refreshEventTab());
       } catch (e) {
-        const msg = e instanceof Error ? e.message : 'לא ניתן לשמור את הפעולה.';
+        const msg = e instanceof Error ? e.message : 'הפעולה נכשלה. נסה/י שוב';
         toast.error(msg);
       } finally {
         setSwipeBusyUserId(null);
@@ -119,6 +117,24 @@ export default function ClicksPage() {
     },
     [isMember, refresh, refreshEventTab, tab, navigate],
   );
+
+  const handleBoost = useCallback(async () => {
+    if (!isMember) {
+      toast('לא ניתן לבצע פעולה זו כרגע', { icon: '🔒' });
+      return;
+    }
+    setBoosting(true);
+    try {
+      await recordBoost();
+      toast.success('בוצע בהצלחה');
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'הפעולה נכשלה. נסה/י שוב';
+      toast.error(msg);
+    } finally {
+      setBoosting(false);
+    }
+  }, [isMember, refresh]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -189,6 +205,20 @@ export default function ClicksPage() {
             )}
           </div>
         </div>
+
+        {isMember && (
+          <div className="flex justify-center mt-3">
+            <button
+              type="button"
+              onClick={handleBoost}
+              disabled={boosting}
+              className="inline-flex items-center gap-1.5 rounded-full gradient-primary text-primary-foreground px-4 py-1.5 text-sm font-medium active:scale-[0.97] transition-transform disabled:opacity-50"
+            >
+              <Rocket size={16} />
+              {boosting ? '...' : 'בוסט'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* New clicks counter */}

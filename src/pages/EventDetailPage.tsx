@@ -6,7 +6,7 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError, applyEventDetailSecondarySettled } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError, applyEventDetailSecondarySettled, isEventRegistrationClosed } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useUserMode } from '@/hooks/useUserMode';
@@ -150,6 +150,10 @@ export default function EventDetailPage() {
 
   const handleRegister = async () => {
     if (!eventId || !authId) return;
+    if (event && isEventRegistrationClosed(event)) {
+      sonner.error('ההרשמה לאירוע הסתיימה');
+      return;
+    }
     if (event?.requires_subscription && role === 'guest') {
       sonner('ההרשמה לאירועים לחברי קהילה', {
         description: 'עברו למנוי כדי להירשם עד 3 אירועים בחודש וליהנות מכל התכונות.',
@@ -259,6 +263,7 @@ export default function EventDetailPage() {
   }
 
   const isPast = event.status === 'past';
+  const registrationClosed = isEventRegistrationClosed(event);
   const isRegistered =
     registration?.status === 'registered' ||
     registration?.status === 'approved' ||
@@ -605,6 +610,13 @@ export default function EventDetailPage() {
                   </button>
                 )}
               </div>
+            ) : registrationClosed ? (
+              <button
+                disabled
+                className="w-full rounded-[999px] py-3.5 font-semibold text-base bg-muted text-muted-foreground"
+              >
+                ההרשמה לאירוע הסתיימה
+              </button>
             ) : (
               <button
                 onClick={event.requires_subscription && role === 'guest' ? () => navigate('/subscription') : handleRegister}

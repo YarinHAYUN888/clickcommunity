@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Crown, Check, Sparkles, Heart, Gift, Loader2, Copy, MessageCircle } from 'lucide-react';
+import { Crown, Check, Sparkles, Heart, Gift, Loader2, Copy, MessageCircle, CalendarPlus } from 'lucide-react';
 import { SpinnerOverlay, LumaSpin } from '@/components/ui/luma-spin';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
@@ -234,6 +234,54 @@ function ReferralShareCard({
   );
 }
 
+const EVENT_CREATION_POINTS = 200;
+
+// ---- Create Events (200 points) ----
+function CreateEventsCard({ points }: { points: number }) {
+  const navigate = useNavigate();
+  const reached = points >= EVENT_CREATION_POINTS;
+  const progress = Math.min(100, Math.round((points / EVENT_CREATION_POINTS) * 100));
+
+  return (
+    <GlassCard variant="strong" className="p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <CalendarPlus size={20} className="text-primary" />
+        <h3 className="text-sm font-semibold text-foreground">יצירת אירועים</h3>
+      </div>
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        כאשר תגיעו ל-{EVENT_CREATION_POINTS} נקודות באפליקציה, תוכלו ליצור אירוע משלכם לקהילה.
+      </p>
+
+      <div className="space-y-1.5">
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div className="h-full rounded-full gradient-primary transition-all" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          צברת {points} מתוך {EVENT_CREATION_POINTS} נקודות
+        </p>
+      </div>
+
+      {reached ? (
+        <button
+          type="button"
+          onClick={() => navigate('/events/create')}
+          className="w-full h-11 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold active:scale-[0.97] transition-transform"
+        >
+          צור/י אירוע
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled
+          className="w-full h-11 rounded-xl bg-muted text-muted-foreground text-sm font-medium cursor-not-allowed"
+        >
+          יצירת אירוע תיפתח ב-{EVENT_CREATION_POINTS} נקודות
+        </button>
+      )}
+    </GlassCard>
+  );
+}
+
 // ---- Member View ----
 function MemberView({ userId }: { userId: string }) {
   const navigate = useNavigate();
@@ -329,6 +377,9 @@ function MemberView({ userId }: { userId: string }) {
         </GlassCard>
 
         <BenefitsCard points={stats?.points ?? 0} />
+
+        {/* Create events at 200 points */}
+        <CreateEventsCard points={stats?.points ?? 0} />
 
         {/* Referral — all members */}
         {stats && <ReferralShareCard stats={stats} />}
