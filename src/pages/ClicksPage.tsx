@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Sparkles, Zap, Rocket } from 'lucide-react';
+import { Heart, Sparkles, Zap } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
 import ProfileCard from '@/components/clicks/ProfileCard';
 import ClicksFeedSkeleton from '@/components/clicks/ClicksFeedSkeleton';
@@ -14,7 +14,6 @@ import { useNavigate } from 'react-router-dom';
 import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
 import { CHAT_UNREAD_REFRESH_EVENT, notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
 import { recordProfileSwipe, SwipeAction } from '@/services/clicksSwipe';
-import { recordBoost } from '@/services/clickActions';
 import { toast } from 'sonner';
 
 export default function ClicksPage() {
@@ -39,7 +38,6 @@ export default function ClicksPage() {
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
 
   const feedRef = useRef<HTMLDivElement>(null);
-  const [boosting, setBoosting] = useState(false);
 
   // Icebreaker state
   const [icebreakerOpen, setIcebreakerOpen] = useState(false);
@@ -132,24 +130,6 @@ export default function ClicksPage() {
     [isMember, refresh, refreshEventTab, tab, navigate, removeFromFeed, removeFromEventTab],
   );
 
-  const handleBoost = useCallback(async () => {
-    if (!isMember) {
-      toast('לא ניתן לבצע פעולה זו כרגע', { icon: '🔒' });
-      return;
-    }
-    setBoosting(true);
-    try {
-      await recordBoost();
-      toast.success('בוצע בהצלחה');
-      await refresh();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'הפעולה נכשלה. נסה/י שוב';
-      toast.error(msg);
-    } finally {
-      setBoosting(false);
-    }
-  }, [isMember, refresh]);
-
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     const refreshPromise = tab === 'general' ? refresh() : refreshEventTab();
@@ -193,46 +173,41 @@ export default function ClicksPage() {
 
         {/* Tab toggle */}
         <div className="flex justify-center">
-          <div className="relative flex gap-0 bg-secondary rounded-full p-1">
-            <motion.div
-              layoutId="tab-indicator"
-              className="absolute top-1 bottom-1 bg-card rounded-full shadow-sm"
-              style={{
-                width: isMember ? '50%' : '100%',
-                ...(tab === 'general' ? { right: 4 } : { left: 4 }),
-              }}
-              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            />
+          <div className="relative flex bg-secondary rounded-full p-1 w-full max-w-[360px]">
             <button
+              type="button"
               onClick={() => setTab('general')}
-              className={`relative z-10 px-5 py-2 rounded-full text-[15px] font-medium transition-colors ${tab === 'general' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}
+              className={`relative z-10 flex-1 px-3 py-2 rounded-full text-[15px] font-medium transition-colors ${tab === 'general' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}
             >
               כללי
+              {tab === 'general' && (
+                <motion.span
+                  layoutId="clicks-tab-indicator"
+                  className="absolute inset-0 rounded-full bg-card shadow-sm"
+                  style={{ zIndex: -1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
             </button>
             {isMember && (
               <button
+                type="button"
                 onClick={() => setTab('event')}
-                className={`relative z-10 px-5 py-2 rounded-full text-[15px] font-medium transition-colors ${tab === 'event' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}
+                className={`relative z-10 flex-1 px-3 py-2 rounded-full text-[15px] font-medium transition-colors whitespace-nowrap ${tab === 'event' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}
               >
                 לאירוע הקרוב
+                {tab === 'event' && (
+                  <motion.span
+                    layoutId="clicks-tab-indicator"
+                    className="absolute inset-0 rounded-full bg-card shadow-sm"
+                    style={{ zIndex: -1 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
               </button>
             )}
           </div>
         </div>
-
-        {isMember && (
-          <div className="flex justify-center mt-3">
-            <button
-              type="button"
-              onClick={handleBoost}
-              disabled={boosting}
-              className="inline-flex items-center gap-1.5 rounded-full gradient-primary text-primary-foreground px-4 py-1.5 text-sm font-medium active:scale-[0.97] transition-transform disabled:opacity-50"
-            >
-              <Rocket size={16} />
-              {boosting ? '...' : 'בוסט'}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* New clicks counter */}
