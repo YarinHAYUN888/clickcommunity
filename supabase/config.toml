@@ -43,3 +43,7 @@ verify_jwt = true
 
 [functions.compute-compatibility]
 verify_jwt = true
+
+# Authenticated members only; forwards subscription payment request to Make webhook
+[functions.create-subscription-payment]
+verify_jwt = true

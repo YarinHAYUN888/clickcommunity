@@ -2,19 +2,22 @@ import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Crown, Check, Sparkles, Heart, Gift, Loader2, Copy, MessageCircle, CalendarPlus } from 'lucide-react';
-import { SpinnerOverlay, LumaSpin } from '@/components/ui/luma-spin';
+import { LumaSpin } from '@/components/ui/luma-spin';
+import { Skeleton } from '@/components/ui/skeleton';
 import GlassCard from '@/components/clicks/GlassCard';
 import { supabase } from '@/integrations/supabase/client';
-import { getProfileStats, getSubscription, checkSubscriptionEligibility, cancelSubscription } from '@/services/profile';
+import { getProfileStats, getSubscription, checkSubscriptionEligibility, cancelSubscription, createSubscriptionPayment } from '@/services/profile';
 import PointsCard from '@/components/clicks/PointsCard';
 import BenefitsCard from '@/components/clicks/BenefitsCard';
 import { toast } from 'sonner';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 // ---- Guest View ----
 function GuestView({ userId }: { userId: string }) {
   const navigate = useNavigate();
   const [modalType, setModalType] = useState<'must_attend' | 'insufficient_votes' | null>(null);
   const [checking, setChecking] = useState(false);
+  const [paying, setPaying] = useState(false);
   const [points, setPoints] = useState(0);
 
   useEffect(() => {
@@ -32,19 +35,41 @@ function GuestView({ userId }: { userId: string }) {
     };
   }, [userId]);
 
+  const startPayment = async () => {
+    setPaying(true);
+    try {
+      const result = await createSubscriptionPayment();
+      if (result?.success && result.payment_url) {
+        window.location.href = result.payment_url;
+        return;
+      }
+      if (result?.success) {
+        toast.success('בקשת התשלום נשלחה בהצלחה');
+        return;
+      }
+      toast.error('לא הצלחנו לפתוח תשלום כרגע. נסה/י שוב בעוד רגע.');
+    } catch {
+      toast.error('לא הצלחנו לפתוח תשלום כרגע. נסה/י שוב בעוד רגע.');
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const handleCTA = async () => {
+    if (checking || paying) return;
     setChecking(true);
     try {
       const result = await checkSubscriptionEligibility(userId);
       if (result.eligible) {
-        toast('מערכת התשלום תחובר בקרוב!', { icon: '💳' });
+        await startPayment();
       } else {
         setModalType(result.reason === 'must_attend_event' ? 'must_attend' : 'insufficient_votes');
       }
     } catch {
       toast.error('שגיאה בבדיקת הזכאות');
+    } finally {
+      setChecking(false);
     }
-    setChecking(false);
   };
 
   return (
@@ -87,10 +112,10 @@ function GuestView({ userId }: { userId: string }) {
 
         <button
           onClick={handleCTA}
-          disabled={checking}
-          className="w-full h-14 rounded-full gradient-primary text-primary-foreground font-semibold text-lg shadow-glass-md active:scale-[0.97] transition-transform flex items-center justify-center gap-2"
+          disabled={checking || paying}
+          className="w-full h-14 rounded-full gradient-primary text-primary-foreground font-semibold text-lg shadow-glass-md active:scale-[0.97] transition-transform flex items-center justify-center gap-2 disabled:opacity-70"
         >
-          {checking ? <Loader2 className="animate-spin" size={20} /> : 'הצטרף/י עכשיו'}
+          {checking || paying ? <Loader2 className="animate-spin" size={20} /> : 'מעבר לתשלום'}
         </button>
 
         {/* Create events at 200 points */}
@@ -465,26 +490,23 @@ function MemberView({ userId }: { userId: string }) {
 
 // ---- Main ----
 export default function SubscriptionPage() {
-  const [userId, setUserId] = useState('');
-  const [role, setRole] = useState<string>('guest');
-  const [loading, setLoading] = useState(true);
+  const { authId, profile, loading: userLoading } = useCurrentUser();
+  const role =
+    profile?.role === 'member' || profile?.subscription_status === 'active' ? 'member' : 'guest';
 
-  useEffect(() => {
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) { setLoading(false); return; }
-      setUserId(session.user.id);
-      const { data } = await supabase
-        .from('profiles')
-        .select('role, subscription_status')
-        .eq('user_id', session.user.id)
-        .single();
-      if (data?.role === 'member' || data?.subscription_status === 'active') setRole('member');
-      setLoading(false);
-    })();
-  }, []);
+  if (userLoading && !profile) {
+    return (
+      <div className="min-h-screen gradient-bg pb-24 px-4 pt-8 max-w-lg mx-auto space-y-4">
+        <Skeleton className="h-48 w-full rounded-2xl" />
+        <Skeleton className="h-32 w-full rounded-2xl" />
+        <Skeleton className="h-12 w-full rounded-full" />
+      </div>
+    );
+  }
 
-  if (loading) return <SpinnerOverlay />;
+  if (!authId) {
+    return null;
+  }
 
-  return role === 'member' ? <MemberView userId={userId} /> : <GuestView userId={userId} />;
+  return role === 'member' ? <MemberView userId={authId} /> : <GuestView userId={authId} />;
 }

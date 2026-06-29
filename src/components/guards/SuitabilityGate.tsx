@@ -10,7 +10,8 @@ export default function SuitabilityGate() {
   const { profile, loading, authId } = useCurrentUser();
   const location = useLocation();
 
-  if (loading) {
+  // Only block the app shell on cold start — keep tabs visible during background profile refresh.
+  if (loading && !profile && !authId) {
     return <SpinnerOverlay />;
   }
 

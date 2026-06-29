@@ -2,7 +2,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import BottomTabBar from '@/components/clicks/BottomTabBar';
 import PremiumBackground from '@/components/ui/PremiumBackground';
-import { springs } from '@/lib/motion';
 import { ChatUnreadProvider } from '@/contexts/ChatUnreadContext';
 
 export default function MainLayout() {
@@ -13,13 +12,13 @@ export default function MainLayout() {
       <div className="relative min-h-screen">
         <PremiumBackground />
         <div className="relative" style={{ zIndex: 1 }}>
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false}>
             <motion.div
               key={location.pathname}
-              initial={false}
-              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.99, filter: 'blur(4px)' }}
-              transition={springs.gentle}
+              initial={{ opacity: 0.96 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
               className="pb-20"
             >
               <Outlet />

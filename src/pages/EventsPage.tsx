@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, CalendarCheck, CalendarDays } from 'lucide-react';
+import { Calendar, CalendarCheck } from 'lucide-react';
 import EventCard from '@/components/clicks/EventCard';
-import EventsCalendarView from '@/components/clicks/EventsCalendarView';
 import { getUpcomingEventsRanked, getPastEventsRanked, syncPastEventsIfNeeded, RankedEventRow } from '@/services/events';
 import { MEMBER_EVENT_MIN_POINTS } from '@/config/points';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -11,11 +10,10 @@ import { useUserMode } from '@/hooks/useUserMode';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 
-type TabId = 'upcoming' | 'past' | 'calendar';
+type TabId = 'upcoming' | 'past';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'upcoming', label: 'הקרובים' },
-  { id: 'calendar', label: 'לוח שנה' },
   { id: 'past', label: 'עברו' },
 ];
 
@@ -35,11 +33,6 @@ export default function EventsPage() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'calendar') {
-      // Calendar view manages its own data
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     const fetch =
       tab === 'upcoming'
@@ -60,9 +53,9 @@ export default function EventsPage() {
           <Calendar size={22} className="text-accent" />
         </div>
 
-        {/* Tab Toggle (3 segments) */}
+        {/* Tab Toggle */}
         <div className="flex justify-center">
-          <div className="relative flex bg-secondary rounded-[999px] p-1 w-full max-w-[360px]">
+          <div className="relative flex bg-secondary rounded-[999px] p-1 w-full max-w-[280px]">
             {TABS.map(t => {
               const active = tab === t.id;
               return (
@@ -74,7 +67,6 @@ export default function EventsPage() {
                     color: active ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
                   }}
                 >
-                  {t.id === 'calendar' && <CalendarDays size={14} />}
                   {t.label}
                   {active && (
                     <motion.span
@@ -113,17 +105,7 @@ export default function EventsPage() {
       {/* Content */}
       <div className="px-4 md:px-6 lg:px-8 pt-4 max-w-[640px] mx-auto">
         <AnimatePresence mode="wait">
-          {tab === 'calendar' ? (
-            <motion.div
-              key="calendar"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-            >
-              <EventsCalendarView currentUserId={authId || undefined} isShadowUser={isShadowUser} />
-            </motion.div>
-          ) : loading ? (
+          {loading ? (
             <motion.div
               key="loading"
               initial={{ opacity: 0 }}

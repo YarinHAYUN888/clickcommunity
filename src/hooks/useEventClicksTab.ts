@@ -42,7 +42,7 @@ export function useEventClicksTab(authId: string | null | undefined) {
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!authId) {
       setItems([]);
       setEmptyMessage(null);
@@ -51,7 +51,9 @@ export function useEventClicksTab(authId: string | null | undefined) {
       return;
     }
 
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const event = await getNextRegisteredUpcomingEvent(authId, isShadowUser);
       if (!event) {
@@ -79,5 +81,9 @@ export function useEventClicksTab(authId: string | null | undefined) {
     void refresh();
   }, [refresh]);
 
-  return { items, loading, emptyMessage, eventName, refresh };
+  const removeFromFeed = useCallback((userId: string) => {
+    setItems((prev) => prev.filter((i) => i.profile.user_id !== userId));
+  }, []);
+
+  return { items, loading, emptyMessage, eventName, refresh, removeFromFeed };
 }

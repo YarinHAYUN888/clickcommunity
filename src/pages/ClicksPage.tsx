@@ -23,17 +23,19 @@ export default function ClicksPage() {
   const isMember = role === 'member';
   const [tab, setTab] = useState<'general' | 'event'>('general');
   /** חובה להשתמש ב-authId מהסשן — לא ב-myProfile.user_id: אחרת כשטעינת הפרופיל מתעכבת הפיד יוצא ריק לצמיתות */
-  const { items, loading: feedLoading, error: feedError, refresh } = useClicksFeed(authId, myProfile);
+  const { items, loading: feedLoading, error: feedError, refresh, removeFromFeed } = useClicksFeed(authId, myProfile);
   const {
     items: eventTabItems,
     loading: eventTabLoading,
     emptyMessage: eventTabEmptyMessage,
     eventName: eventTabEventName,
     refresh: refreshEventTab,
+    removeFromFeed: removeFromEventTab,
   } = useEventClicksTab(authId);
   const matchByUserId = useCompatibilityLayer(authId, items);
   const eventMatchByUserId = useCompatibilityLayer(authId, eventTabItems);
-  const loading = userLoading || (tab === 'general' ? feedLoading : eventTabLoading);
+  const loading =
+    (!authId && userLoading) || (tab === 'general' ? feedLoading : eventTabLoading);
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
 
   const feedRef = useRef<HTMLDivElement>(null);
@@ -92,30 +94,42 @@ export default function ClicksPage() {
         toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
         return;
       }
+
+      const logLabel =
+        action === 'pass' ? 'CLICKS PASS CLICKED' : action === 'like' ? 'CLICKS LIKE CLICKED' : 'CLICKS SUPER LIKE CLICKED';
+      console.info(logLabel, { toUserId });
+
+      const removeFromActiveFeed = tab === 'general' ? removeFromFeed : removeFromEventTab;
+
       try {
         setSwipeBusyUserId(toUserId);
+        removeFromActiveFeed(toUserId);
+        setProfileOpen(false);
+
         const r = await recordProfileSwipe(toUserId, action);
+        console.info('CLICKS ACTION SAVED', { toUserId, action, mutual: r.mutual });
+
         if (r.mutual) {
           if (r.chat_id) {
             toast.success('יש התאמה! עוברים לצ׳אט');
             notifyChatUnreadRefresh();
-            setProfileOpen(false);
             navigate(`/chats/${r.chat_id}`);
           } else {
             toast.error('נוצרה התאמה אך לא נמצא צ׳אט. נסו שוב או פתחו הודעה מהרשימה.');
           }
-        } else {
-          toast.success('בוצע בהצלחה');
         }
-        await (tab === 'general' ? refresh() : refreshEventTab());
+
+        void (tab === 'general' ? refresh(true) : refreshEventTab(true));
       } catch (e) {
+        console.warn('CLICKS ACTION FAILED', { toUserId, action, error: e });
         const msg = e instanceof Error ? e.message : 'הפעולה נכשלה. נסה/י שוב';
         toast.error(msg);
+        void (tab === 'general' ? refresh(true) : refreshEventTab(true));
       } finally {
         setSwipeBusyUserId(null);
       }
     },
-    [isMember, refresh, refreshEventTab, tab, navigate],
+    [isMember, refresh, refreshEventTab, tab, navigate, removeFromFeed, removeFromEventTab],
   );
 
   const handleBoost = useCallback(async () => {

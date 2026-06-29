@@ -7,6 +7,7 @@ import ResponsiveShell from "@/components/ui/ResponsiveShell";
 import MainLayout from "@/layouts/MainLayout";
 import { OnboardingProvider } from "@/contexts/OnboardingContext";
 import { AdminProvider } from "@/contexts/AdminContext";
+import { CurrentUserProvider } from "@/contexts/CurrentUserContext";
 
 import WelcomePage from "./pages/WelcomePage";
 import LandingPage from "./pages/LandingPage";
@@ -50,6 +51,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <OnboardingProvider>
+        <CurrentUserProvider>
         <AdminProvider>
           <BrowserRouter>
             <Routes>
@@ -108,6 +110,7 @@ const App = () => (
             </Routes>
           </BrowserRouter>
         </AdminProvider>
+        </CurrentUserProvider>
       </OnboardingProvider>
     </TooltipProvider>
   </QueryClientProvider>

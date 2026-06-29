@@ -72,6 +72,11 @@ export default function FullProfileModal({
     void onSwipe(action);
   };
 
+  const handleSwipeClick = (e: React.MouseEvent, action: SwipeAction) => {
+    e.stopPropagation();
+    runSwipe(action);
+  };
+
   return (
     <AnimatePresence>
       {open && (
@@ -208,15 +213,15 @@ export default function FullProfileModal({
             </div>
 
             {/* Sticky bottom action */}
-            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-card via-card to-transparent pb-[calc(16px+env(safe-area-inset-bottom))] space-y-3">
+            <div className="absolute inset-x-0 bottom-0 z-20 p-4 bg-gradient-to-t from-card via-card to-transparent pb-[calc(16px+env(safe-area-inset-bottom))] space-y-3">
               {onSwipe && (
-                <div className="flex justify-center gap-3" dir="ltr">
+                <div className="relative z-10 flex justify-center gap-3" dir="ltr">
                   <motion.button
                     type="button"
                     disabled={!!swipeBusy}
                     whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
-                    onClick={() => runSwipe('pass')}
-                    className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-border bg-background text-muted-foreground shadow-sm disabled:opacity-50"
+                    onClick={(e) => handleSwipeClick(e, 'pass')}
+                    className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-border bg-background text-muted-foreground shadow-sm disabled:opacity-50 touch-manipulation"
                     title="דילוג"
                   >
                     <X size={22} strokeWidth={2.5} />
@@ -225,8 +230,8 @@ export default function FullProfileModal({
                     type="button"
                     disabled={!!swipeBusy}
                     whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
-                    onClick={() => runSwipe('super_like')}
-                    className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50"
+                    onClick={(e) => handleSwipeClick(e, 'super_like')}
+                    className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50 touch-manipulation"
                     title="סופר־לייק"
                   >
                     <Zap size={22} className="fill-current" />
@@ -235,8 +240,8 @@ export default function FullProfileModal({
                     type="button"
                     disabled={!!swipeBusy}
                     whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
-                    onClick={() => runSwipe('like')}
-                    className="flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-md disabled:opacity-50"
+                    onClick={(e) => handleSwipeClick(e, 'like')}
+                    className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-md disabled:opacity-50 touch-manipulation"
                     title="לייק"
                   >
                     <Heart size={22} className="fill-current" />

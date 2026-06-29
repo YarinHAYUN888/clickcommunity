@@ -221,6 +221,14 @@ export async function checkSubscriptionEligibility(userId: string) {
   return data;
 }
 
+export async function createSubscriptionPayment(): Promise<{ success: boolean; payment_url?: string | null }> {
+  const { data, error } = await supabase.functions.invoke('create-subscription-payment', {
+    body: {}
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function createReferral(referrerId: string, method: 'phone' | 'email', contact: string) {
   const { data, error } = await supabase.functions.invoke('create-referral', {
     body: { referrer_id: referrerId, method, contact }

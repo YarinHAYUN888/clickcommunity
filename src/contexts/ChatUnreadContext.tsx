@@ -7,9 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useLocation } from 'react-router-dom';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { getTotalUnreadCount } from '@/services/chat';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 type ChatUnreadContextValue = {
   totalUnread: number;
@@ -22,7 +21,6 @@ export const CHAT_UNREAD_REFRESH_EVENT = 'chat-unread-refresh';
 
 export function ChatUnreadProvider({ children }: { children: ReactNode }) {
   const { authId } = useCurrentUser();
-  const location = useLocation();
   const [totalUnread, setTotalUnread] = useState(0);
 
   const refreshChatUnread = useCallback(async () => {
@@ -40,7 +38,7 @@ export function ChatUnreadProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refreshChatUnread();
-  }, [location.pathname, refreshChatUnread]);
+  }, [authId, refreshChatUnread]);
 
   useEffect(() => {
     const onVisible = () => void refreshChatUnread();

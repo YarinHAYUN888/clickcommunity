@@ -1,20 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { ensureCommunityMemberDefaults } from '@/services/profileSavePipeline';
-import { DEFAULT_NEW_USER_ROLE_FALLBACK } from '@/lib/profileCompletion';
-
-const profileListeners = new Set<(userId: string) => void>();
-
-/** Call after server-side profile changes (e.g. admin approval) so all `useCurrentUser` instances refetch. */
-export function notifyProfileUpdated(userId: string) {
-  profileListeners.forEach((fn) => {
-    try {
-      fn(userId);
-    } catch {
-      /* ignore */
-    }
-  });
-}
+import { useCurrentUserContext } from '@/contexts/CurrentUserContext';
 
 export interface SupabaseProfile {
   id: string;
@@ -59,178 +43,20 @@ export interface CurrentUser {
   loading: boolean;
 }
 
-export function useCurrentUser(): CurrentUser {
-  const [authId, setAuthId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<SupabaseProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const mountedRef = useRef(true);
+/** Shared listener registry for profile refresh signals. */
+export const profileListeners = new Set<(userId: string) => void>();
 
-  useEffect(() => {
-    mountedRef.current = true;
-
-    const fetchProfile = (userId: string, userMeta?: { first_name?: unknown; last_name?: unknown }) => {
-      if (mountedRef.current) setLoading(true);
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle()
-        .then(async ({ data, error }) => {
-          if (error && import.meta.env.DEV) console.error('useCurrentUser fetchProfile:', error.message);
-          if (!error && import.meta.env.DEV) {
-            console.info('[useCurrentUser] profile fetch success', { userId, found: !!data });
-          }
-          let profileData = (data as SupabaseProfile | null) ?? null;
-          if (!profileData) {
-            const firstName =
-              typeof userMeta?.first_name === 'string' ? userMeta.first_name.trim() : '';
-            const lastName =
-              typeof userMeta?.last_name === 'string' ? userMeta.last_name.trim() : '';
-
-            // Self-heal: create missing profile row for authenticated user.
-            const { error: upsertErr } = await supabase
-              .from('profiles')
-              .upsert(
-                {
-                  user_id: userId,
-                  first_name: firstName || null,
-                  last_name: lastName || null,
-                  role: DEFAULT_NEW_USER_ROLE_FALLBACK,
-                  moderation_status: 'pending',
-                  suitability_status: 'pending',
-                  is_shadow: false,
-                  profile_completed: false,
-                  image_upload_status: 'pending',
-                },
-                { onConflict: 'user_id' }
-              );
-            if (upsertErr) {
-              console.error('useCurrentUser profile self-heal failed:', upsertErr.message);
-            } else {
-              const { data: refetched, error: refetchErr } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('user_id', userId)
-                .maybeSingle();
-              if (refetchErr) console.error('useCurrentUser refetch after self-heal failed:', refetchErr.message);
-              profileData = (refetched as SupabaseProfile | null) ?? null;
-            }
-          }
-
-          if (profileData && !profileData.role) {
-            try {
-              await ensureCommunityMemberDefaults(userId);
-              const { data: healed } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('user_id', userId)
-                .maybeSingle();
-              if (healed) profileData = healed as SupabaseProfile;
-            } catch (healErr) {
-              console.warn('[useCurrentUser] profile defaults heal failed', healErr);
-            }
-          }
-
-          if (mountedRef.current) setProfile(profileData);
-          if (profileData) {
-            console.info('[useCurrentUser] profile state', {
-              userId,
-              role: profileData.role,
-              suitability: profileData.suitability_status,
-              completed: profileData.profile_completed,
-              imageUpload: profileData.image_upload_status,
-            });
-          }
-          if (mountedRef.current) setLoading(false);
-        })
-        .catch((e) => {
-          console.error('useCurrentUser fetchProfile failed:', e);
-          if (mountedRef.current) setLoading(false);
-        });
-    };
-
-    // Set up listener BEFORE getSession to avoid missing events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        if (mountedRef.current) setProfile(null);
-        setAuthId(session.user.id);
-        fetchProfile(session.user.id, session.user.user_metadata ?? undefined);
-      } else {
-        setAuthId(null);
-        setProfile(null);
-        if (mountedRef.current) setLoading(false);
-      }
-    });
-
-    // Initial session check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.user) {
-        if (mountedRef.current) setLoading(false);
-        return;
-      }
-      setAuthId(session.user.id);
-      fetchProfile(session.user.id, session.user.user_metadata ?? undefined);
-    });
-
-    return () => {
-      mountedRef.current = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // When admin (or triggers) updates `profiles`, refetch so gates and tabs stay in sync.
-  useEffect(() => {
-    if (!authId) return;
-
-    const pull = () => {
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', authId)
-        .maybeSingle()
-        .then(({ data, error }) => {
-          if (!mountedRef.current || error) return;
-          setProfile((data as SupabaseProfile) ?? null);
-        });
-    };
-
-    const onExternalUpdate = (userId: string) => {
-      if (userId === authId) pull();
-    };
-    profileListeners.add(onExternalUpdate);
-
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+/** Call after server-side profile changes (e.g. admin approval) so all consumers refetch. */
+export function notifyProfileUpdated(userId: string) {
+  profileListeners.forEach((fn) => {
     try {
-      channel = supabase
-        .channel(`profiles-self-${authId}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'profiles', filter: `user_id=eq.${authId}` },
-          () => {
-            pull();
-          },
-        )
-        .subscribe();
-    } catch (e) {
-      console.warn('[useCurrentUser] profile realtime subscribe failed:', e);
+      fn(userId);
+    } catch {
+      /* ignore */
     }
+  });
+}
 
-    return () => {
-      profileListeners.delete(onExternalUpdate);
-      if (channel) {
-        try {
-          void supabase.removeChannel(channel);
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-  }, [authId]);
-
-  return {
-    authId: authId || '',
-    profile,
-    role: (profile?.role as 'guest' | 'member') || 'guest',
-    loading,
-  };
+export function useCurrentUser(): CurrentUser {
+  return useCurrentUserContext();
 }

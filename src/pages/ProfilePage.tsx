@@ -1,7 +1,7 @@
 import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { User, Edit3, LogOut, Loader2, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { SpinnerOverlay } from '@/components/ui/luma-spin';
+import { SkeletonProfileCard } from '@/components/ui/SkeletonPresets';
 import GlassCard from '@/components/clicks/GlassCard';
 import InterestPill from '@/components/clicks/InterestPill';
 import { supabase } from '@/integrations/supabase/client';
@@ -11,6 +11,7 @@ import { motion } from 'framer-motion';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
 import { lifeNicheLabel } from '@/data/lifeNiche';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 interface ProfileStats {
   events_attended: number;
@@ -78,6 +79,8 @@ function isUuid(s: string) {
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { userId: paramUserId } = useParams();
+  const { profile: cachedProfile, authId } = useCurrentUser();
+  const isOwnProfile = !paramUserId || paramUserId === authId;
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState<ProfileStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,22 +108,33 @@ export default function ProfilePage() {
         }
         const uid = paramUserId || session.user.id;
 
-        const profileData = await getMyProfile(uid);
-        if (!mounted) return;
+        if (!paramUserId && cachedProfile && cachedProfile.user_id === uid) {
+          if (mounted) {
+            setProfile({
+              ...cachedProfile,
+              photos: normalizePhotoUrls(cachedProfile.photos) as typeof cachedProfile.photos,
+              interests: normalizeInterestLabels(cachedProfile.interests) as typeof cachedProfile.interests,
+            });
+            setLoading(false);
+          }
+        } else {
+          const profileData = await getMyProfile(uid);
+          if (!mounted) return;
 
-        if (!profileData) {
-          setProfile(null);
-          setLoadError('לא נמצא פרופיל במסד הנתונים לחשבון זה. נסו להתחבר מחדש או ליצור קשר עם התמיכה.');
+          if (!profileData) {
+            setProfile(null);
+            setLoadError('לא נמצא פרופיל במסד הנתונים לחשבון זה. נסו להתחבר מחדש או ליצור קשר עם התמיכה.');
+            setLoading(false);
+            return;
+          }
+
+          setProfile({
+            ...profileData,
+            photos: normalizePhotoUrls(profileData.photos) as typeof profileData.photos,
+            interests: normalizeInterestLabels(profileData.interests) as typeof profileData.interests,
+          });
           setLoading(false);
-          return;
         }
-
-        setProfile({
-          ...profileData,
-          photos: normalizePhotoUrls(profileData.photos) as typeof profileData.photos,
-          interests: normalizeInterestLabels(profileData.interests) as typeof profileData.interests,
-        });
-        setLoading(false);
 
         getProfileStats(uid)
           .then((statsData) => {
@@ -139,7 +153,7 @@ export default function ProfilePage() {
     return () => {
       mounted = false;
     };
-  }, [paramUserId]);
+  }, [paramUserId, cachedProfile]);
 
   if (paramUserId === 'edit') {
     return <Navigate to="/profile/edit" replace />;
@@ -159,8 +173,12 @@ export default function ProfilePage() {
     );
   }
 
-  if (loading) {
-    return <SpinnerOverlay />;
+  if (loading && !(isOwnProfile && cachedProfile)) {
+    return (
+      <div className="min-h-screen gradient-bg pb-24 px-4 pt-8 max-w-lg mx-auto">
+        <SkeletonProfileCard />
+      </div>
+    );
   }
 
   if (loadError || !profile) {

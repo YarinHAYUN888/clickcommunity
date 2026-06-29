@@ -47,14 +47,16 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     ],
   );
 
-  const fetchProfiles = useCallback(async () => {
+  const fetchProfiles = useCallback(async (options?: { silent?: boolean }) => {
     if (!currentUserId) {
       setLoading(false);
       setError(null);
       return;
     }
 
-    setLoading(true);
+    if (!options?.silent) {
+      setLoading(true);
+    }
     setError(null);
 
     const nowIso = new Date().toISOString();
@@ -153,7 +155,16 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     fetchProfiles();
   }, [fetchProfiles]);
 
-  return { items, loading, error, refresh: fetchProfiles };
+  const removeFromFeed = useCallback((userId: string) => {
+    setItems((prev) => prev.filter((i) => i.profile.user_id !== userId));
+  }, []);
+
+  const refresh = useCallback(
+    (silent = false) => fetchProfiles({ silent }),
+    [fetchProfiles],
+  );
+
+  return { items, loading, error, refresh, removeFromFeed };
 }
 
 /** Helper: get emoji for an interest label */
