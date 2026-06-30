@@ -10,6 +10,8 @@ export interface ClickFeedItem {
   compatibilityScore: number;
   sharedInterests: string[];
   isProfilePartial: boolean;
+  /** Someone liked this viewer and they have not swiped back yet */
+  likedYou?: boolean;
 }
 
 /**
@@ -60,7 +62,7 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     setError(null);
 
     const nowIso = new Date().toISOString();
-    const [{ data, error }, swipeRes, boostRes] = await Promise.all([
+    const [{ data, error }, swipeRes, boostRes, incomingRes] = await Promise.all([
       supabase.from('profiles').select('*').neq('user_id', currentUserId),
       supabase.from('profile_swipes').select('to_user_id').eq('from_user_id', currentUserId),
       supabase
@@ -68,6 +70,11 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
         .select('user_id')
         .eq('action_type', 'boost')
         .gt('expires_at', nowIso),
+      supabase
+        .from('profile_swipes')
+        .select('from_user_id')
+        .eq('to_user_id', currentUserId)
+        .in('action', ['like', 'super_like']),
     ]);
 
     if (error) {
@@ -94,6 +101,17 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
       console.warn('[useClicksFeed] profile_swipes unavailable:', swipeRes.error.message);
     }
 
+    const likedYouBy = new Set<string>();
+    if (!incomingRes.error && incomingRes.data) {
+      for (const row of incomingRes.data) {
+        if (row.from_user_id && !swipeHidden.has(row.from_user_id)) {
+          likedYouBy.add(row.from_user_id);
+        }
+      }
+    } else if (incomingRes.error && import.meta.env.DEV) {
+      console.warn('[useClicksFeed] incoming likes unavailable:', incomingRes.error.message);
+    }
+
     const { items: feedItems, report } = buildClicksFeedCandidates(
       meRef.current ?? null,
       data as SupabaseProfile[],
@@ -111,18 +129,26 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
       console.warn('[useClicksFeed] user_click_actions unavailable:', boostRes.error.message);
     }
 
+    const withLikedYou = feedItems.map((item) => ({
+      ...item,
+      likedYou: likedYouBy.has(item.profile.user_id),
+    }));
+
     const prioritizedItems =
-      boostedUserIds.size > 0
-        ? feedItems
+      boostedUserIds.size > 0 || likedYouBy.size > 0
+        ? withLikedYou
             .map((item, index) => ({ item, index }))
             .sort((a, b) => {
+              const aLike = a.item.likedYou ? 1 : 0;
+              const bLike = b.item.likedYou ? 1 : 0;
+              if (aLike !== bLike) return bLike - aLike;
               const aBoost = boostedUserIds.has(a.item.profile.user_id) ? 1 : 0;
               const bBoost = boostedUserIds.has(b.item.profile.user_id) ? 1 : 0;
               if (aBoost !== bBoost) return bBoost - aBoost;
               return a.index - b.index;
             })
             .map(({ item }) => item)
-        : feedItems;
+        : withLikedYou;
 
     if (import.meta.env.DEV) {
       const excludedByEligibility = Object.entries(report.excludedCounts).reduce((acc, [reason, count]) => {
@@ -154,6 +180,28 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
   useEffect(() => {
     fetchProfiles();
   }, [fetchProfiles]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    const channel = supabase
+      .channel(`profile-swipes-incoming-${currentUserId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profile_swipes',
+          filter: `to_user_id=eq.${currentUserId}`,
+        },
+        () => {
+          void fetchProfiles({ silent: true });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [currentUserId, fetchProfiles]);
 
   const removeFromFeed = useCallback((userId: string) => {
     setItems((prev) => prev.filter((i) => i.profile.user_id !== userId));

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MoreVertical, Flag, Ban, Lock, MessageCircle, ChevronLeft, ChevronRight, Heart, Zap } from 'lucide-react';
+import { X, MoreVertical, Flag, Ban, Lock, MessageCircle, ChevronLeft, ChevronRight, Heart } from 'lucide-react';
 import { SupabaseProfile } from '@/hooks/useCurrentUser';
 import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import InterestPill from './InterestPill';
@@ -65,10 +65,6 @@ export default function FullProfileModal({
 
   const runSwipe = (action: SwipeAction) => {
     if (!onSwipe) return;
-    if (!isMember) {
-      toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
-      return;
-    }
     void onSwipe(action);
   };
 
@@ -225,16 +221,6 @@ export default function FullProfileModal({
                     title="דילוג"
                   >
                     <X size={22} strokeWidth={2.5} />
-                  </motion.button>
-                  <motion.button
-                    type="button"
-                    disabled={!!swipeBusy}
-                    whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
-                    onClick={(e) => handleSwipeClick(e, 'super_like')}
-                    className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50 touch-manipulation"
-                    title="סופר־לייק"
-                  >
-                    <Zap size={22} className="fill-current" />
                   </motion.button>
                   <motion.button
                     type="button"

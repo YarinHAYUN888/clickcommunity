@@ -78,7 +78,11 @@ Deno.serve(async (req) => {
     if (meProf.suspended === true) {
       return new Response(JSON.stringify({ error: "suspended" }), { status: 403, headers: corsHeaders });
     }
-    if (meProf.moderation_status !== "approved" && !meProf.super_role) {
+    const canSwipe =
+      !!meProf.super_role ||
+      meProf.moderation_status === "approved" ||
+      meProf.suitability_status === "active";
+    if (!canSwipe) {
       return new Response(JSON.stringify({ error: "not_approved" }), { status: 403, headers: corsHeaders });
     }
 
@@ -122,10 +126,49 @@ Deno.serve(async (req) => {
       console.log("SUPER LIKE SAVED", { from: userId, to: toUserId });
     }
 
+    async function resolveDirectDm(a: string, b: string): Promise<string> {
+      const { data: existingChats } = await supabaseAdmin
+        .from("chat_participants")
+        .select("chat_id")
+        .eq("user_id", a);
+      if (existingChats && existingChats.length > 0) {
+        const chatIds = existingChats.map((c: { chat_id: string }) => c.chat_id);
+        const { data: otherParticipations } = await supabaseAdmin
+          .from("chat_participants")
+          .select("chat_id")
+          .eq("user_id", b)
+          .in("chat_id", chatIds);
+        if (otherParticipations && otherParticipations.length > 0) {
+          for (const p of otherParticipations) {
+            const { data: chatData } = await supabaseAdmin
+              .from("chats")
+              .select("id, type")
+              .eq("id", p.chat_id)
+              .eq("type", "direct")
+              .single();
+            if (chatData) return chatData.id;
+          }
+        }
+      }
+      const { data: newChat, error: chatErr } = await supabaseAdmin
+        .from("chats")
+        .insert({ type: "direct" })
+        .select("id")
+        .single();
+      if (chatErr) throw chatErr;
+      await supabaseAdmin.from("chat_participants").insert([
+        { chat_id: newChat.id, user_id: a },
+        { chat_id: newChat.id, user_id: b },
+      ]);
+      return newChat.id;
+    }
+
     let mutual = false;
     let chat_id: string | null = null;
 
     if (isLikeAction(action)) {
+      chat_id = await resolveDirectDm(userId, toUserId);
+
       const { data: rev } = await supabaseAdmin
         .from("profile_swipes")
         .select("action")
@@ -134,49 +177,6 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (rev && isLikeAction(rev.action)) {
         mutual = true;
-        // Reuse same DM resolution as create-or-get-dm (duplicated intentionally to avoid changing that function).
-        const { data: existingChats } = await supabaseAdmin
-          .from("chat_participants")
-          .select("chat_id")
-          .eq("user_id", userId);
-        let existingChatId: string | null = null;
-        if (existingChats && existingChats.length > 0) {
-          const chatIds = existingChats.map((c: { chat_id: string }) => c.chat_id);
-          const { data: otherParticipations } = await supabaseAdmin
-            .from("chat_participants")
-            .select("chat_id")
-            .eq("user_id", toUserId)
-            .in("chat_id", chatIds);
-          if (otherParticipations && otherParticipations.length > 0) {
-            for (const p of otherParticipations) {
-              const { data: chatData } = await supabaseAdmin
-                .from("chats")
-                .select("id, type")
-                .eq("id", p.chat_id)
-                .eq("type", "direct")
-                .single();
-              if (chatData) {
-                existingChatId = chatData.id;
-                break;
-              }
-            }
-          }
-        }
-        if (existingChatId) {
-          chat_id = existingChatId;
-        } else {
-          const { data: newChat, error: chatErr } = await supabaseAdmin
-            .from("chats")
-            .insert({ type: "direct" })
-            .select("id")
-            .single();
-          if (chatErr) throw chatErr;
-          await supabaseAdmin.from("chat_participants").insert([
-            { chat_id: newChat.id, user_id: userId },
-            { chat_id: newChat.id, user_id: toUserId },
-          ]);
-          chat_id = newChat.id;
-        }
       }
     }
 

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, Eye, Lock, Calendar, Heart, X, Zap } from 'lucide-react';
+import { MessageCircle, Eye, Lock, Calendar, Heart, X } from 'lucide-react';
 import { motion, useInView } from 'framer-motion';
 import GlassCard from './GlassCard';
 import InterestPill from './InterestPill';
@@ -26,6 +26,8 @@ interface ProfileCardProps {
   showEventBanner?: string;
   /** יש הודעה שלא נקראה ממנו בצ׳אט ישיר */
   hasUnreadDm?: boolean;
+  /** Someone liked the viewer — show badge */
+  likedYou?: boolean;
   swipeBusy?: boolean;
   onSwipe?: (action: SwipeAction) => void | Promise<void>;
   onViewProfile: () => void;
@@ -43,6 +45,7 @@ export default function ProfileCard({
   isMember,
   showEventBanner,
   hasUnreadDm,
+  likedYou,
   swipeBusy,
   onSwipe,
   onViewProfile,
@@ -75,10 +78,6 @@ export default function ProfileCard({
 
   const runSwipe = (action: SwipeAction) => {
     if (!onSwipe) return;
-    if (!isMember) {
-      toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
-      return;
-    }
     void onSwipe(action);
   };
 
@@ -113,6 +112,12 @@ export default function ProfileCard({
       style={{ perspective: 1000 }}
     >
       <GlassCard className="overflow-hidden">
+        {likedYou && (
+          <div className="bg-primary/15 px-4 py-2 flex items-center gap-1.5 justify-center border-b border-primary/20">
+            <Heart size={14} className="text-primary fill-primary" />
+            <span className="text-[13px] font-semibold text-primary">אהב/ה אותך!</span>
+          </div>
+        )}
         {showEventBanner && (
           <div className="bg-secondary px-4 py-2 flex items-center gap-1.5 justify-center">
             <Calendar size={14} className="text-primary" />
@@ -233,17 +238,6 @@ export default function ProfileCard({
                 title="דילוג"
               >
                 <X size={22} strokeWidth={2.5} />
-              </motion.button>
-              <motion.button
-                type="button"
-                disabled={!!swipeBusy}
-                whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
-                transition={springs.snappy}
-                onClick={(e) => handleSwipeClick(e, 'super_like')}
-                className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-accent/50 bg-gradient-to-br from-accent/25 to-primary/20 text-accent shadow-sm disabled:opacity-50 touch-manipulation"
-                title="סופר־לייק"
-              >
-                <Zap size={22} className="fill-current" />
               </motion.button>
               <motion.button
                 type="button"

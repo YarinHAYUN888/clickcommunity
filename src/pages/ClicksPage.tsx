@@ -88,8 +88,8 @@ export default function ClicksPage() {
 
   const handleSwipe = useCallback(
     async (toUserId: string, action: SwipeAction) => {
-      if (!isMember) {
-        toast('לייק ודילוג זמינים לחברי קהילה בלבד', { icon: '🔒' });
+      if (!authId) {
+        toast.error('יש להתחבר מחדש');
         return;
       }
 
@@ -105,16 +105,36 @@ export default function ClicksPage() {
         setProfileOpen(false);
 
         const r = await recordProfileSwipe(toUserId, action);
-        console.info('CLICKS ACTION SAVED', { toUserId, action, mutual: r.mutual });
+        console.info('CLICKS ACTION SAVED', { toUserId, action, mutual: r.mutual, chat_id: r.chat_id });
 
-        if (r.mutual) {
+        if (action === 'pass') {
+          toast.success('הפרופיל הוסר מהקליקים');
+        } else if (r.mutual) {
           if (r.chat_id) {
-            toast.success('יש התאמה! עוברים לצ׳אט');
-            notifyChatUnreadRefresh();
-            navigate(`/chats/${r.chat_id}`);
+            toast.success('יש התאמה! 💜', {
+              action: {
+                label: 'פתח/י צ׳אט',
+                onClick: () => {
+                  notifyChatUnreadRefresh();
+                  navigate(`/chats/${r.chat_id}`);
+                },
+              },
+            });
           } else {
-            toast.error('נוצרה התאמה אך לא נמצא צ׳אט. נסו שוב או פתחו הודעה מהרשימה.');
+            toast.success('יש התאמה! 💜');
           }
+        } else {
+          toast.success('שלחת לייק! 💜', {
+            action: r.chat_id
+              ? {
+                  label: 'פתח/י צ׳אט',
+                  onClick: () => {
+                    notifyChatUnreadRefresh();
+                    navigate(`/chats/${r.chat_id}`);
+                  },
+                }
+              : undefined,
+          });
         }
 
         void (tab === 'general' ? refresh(true) : refreshEventTab(true));
@@ -127,7 +147,7 @@ export default function ClicksPage() {
         setSwipeBusyUserId(null);
       }
     },
-    [isMember, refresh, refreshEventTab, tab, navigate, removeFromFeed, removeFromEventTab],
+    [authId, refresh, refreshEventTab, tab, navigate, removeFromFeed, removeFromEventTab],
   );
 
   const handleRefresh = useCallback(() => {
@@ -287,6 +307,7 @@ export default function ClicksPage() {
                   index={i}
                   isMember={isMember}
                   hasUnreadDm={!!unreadFromUser[item.profile.user_id]}
+                  likedYou={!!item.likedYou}
                   swipeBusy={swipeBusyUserId === item.profile.user_id}
                   onSwipe={(action) => handleSwipe(item.profile.user_id, action)}
                   matchEnrichment={activeMatchByUserId[item.profile.user_id] ?? null}
