@@ -17,9 +17,6 @@ import MomentsSection from '@/components/landing/MomentsSection';
 import LandingFooter from '@/components/landing/LandingFooter';
 import ScrollProgressBar from '@/components/landing/ScrollProgressBar';
 import SectionIndicators from '@/components/landing/SectionIndicators';
-import HaydevPoweredCard from '@/components/haydev/HaydevPoweredCard';
-import HaydevLogo from '@/components/haydev/HaydevLogo';
-import { HAYDEV_WHATSAPP_LINK } from '@/config/haydevBranding';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -72,22 +69,6 @@ export default function LandingPage() {
         <BottomLineSection />
         <SocialSection />
       </main>
-      <section
-        aria-label="Powered by HAYDEV"
-        className="px-6 py-16 md:py-20"
-        style={{ background: 'linear-gradient(180deg, #08080F 0%, #0F0F1A 50%, #08080F 100%)' }}
-      >
-        <div className="max-w-[640px] mx-auto">
-          <HaydevPoweredCard
-            variant="landing"
-            logo={<HaydevLogo className="h-12 sm:h-14 md:h-16" />}
-            title="האפליקציה פותחה באמצעות HAYDEV"
-            subtitle="פיתוח אפליקציות • מערכות SaaS • אוטומציות • AI"
-            buttonText="💬 דברו איתנו ב-WhatsApp"
-            whatsappLink={HAYDEV_WHATSAPP_LINK}
-          />
-        </div>
-      </section>
       <LandingFooter />
     </div>
   );

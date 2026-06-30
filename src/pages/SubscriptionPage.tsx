@@ -11,9 +11,6 @@ import PointsCard from '@/components/clicks/PointsCard';
 import BenefitsCard from '@/components/clicks/BenefitsCard';
 import { toast } from 'sonner';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import HaydevPoweredCard from '@/components/haydev/HaydevPoweredCard';
-import HaydevLogo from '@/components/haydev/HaydevLogo';
-import { HAYDEV_WHATSAPP_LINK } from '@/config/haydevBranding';
 
 // ---- Guest View ----
 function GuestView({ userId }: { userId: string }) {
@@ -511,18 +508,5 @@ export default function SubscriptionPage() {
     return null;
   }
 
-  return (
-    <>
-      {role === 'member' ? <MemberView userId={authId} /> : <GuestView userId={authId} />}
-      <div className="px-4 max-w-lg mx-auto pb-24 pt-2">
-        <HaydevPoweredCard
-          logo={<HaydevLogo className="h-11 sm:h-12" />}
-          title="האפליקציה פותחה באמצעות HAYDEV"
-          subtitle="מערכות מתקדמות, אפליקציות ופתרונות AI לעסקים."
-          buttonText="צור קשר ב-WhatsApp"
-          whatsappLink={HAYDEV_WHATSAPP_LINK}
-        />
-      </div>
-    </>
-  );
+  return role === 'member' ? <MemberView userId={authId} /> : <GuestView userId={authId} />;
 }
