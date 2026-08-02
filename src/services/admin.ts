@@ -149,6 +149,18 @@ export async function updateProfileSuitability(
   throw new Error('Profile suitability update failed after compatibility retries');
 }
 
+/** Super-user only — Edge Function validates JWT + super_role; path derived server-side from user_id */
+export async function getAdminVoiceIntroSignedUrl(userId: string): Promise<{ signedUrl: string; expiresIn: number }> {
+  const { data, error } = await supabase.functions.invoke('admin-get-voice-intro-url', {
+    body: { user_id: userId },
+  });
+  if (error) throw new Error(error.message || 'Failed to get voice intro URL');
+  const body = data as { ok?: boolean; signedUrl?: string; expiresIn?: number; error?: string };
+  if (body?.error) throw new Error(body.error);
+  if (!body?.ok || !body.signedUrl) throw new Error('Failed to get voice intro URL');
+  return { signedUrl: body.signedUrl, expiresIn: body.expiresIn ?? 3600 };
+}
+
 export async function getProfileReceptionStats(targetUserId: string): Promise<{ like_count: number }> {
   const { data, error } = await supabase.functions.invoke('get-profile-reception-stats', {
     body: { target_user_id: targetUserId },

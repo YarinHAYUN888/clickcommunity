@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Loader2, Play, Pause } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
+import { getAdminVoiceIntroSignedUrl } from '@/services/admin';
 
 const SIGNED_TTL = 3600;
 
@@ -53,54 +54,89 @@ function WavePreview({ audioBuffer }: { audioBuffer: AudioBuffer | null }) {
 export function VoiceIntroReviewPlayer({
   objectPath,
   durationSeconds,
+  userId,
+  lazy = false,
+  isActive = true,
+  onRequestPlay,
+  hideDownload = false,
 }: {
   objectPath: string | null;
   durationSeconds: number | null;
+  userId?: string;
+  lazy?: boolean;
+  isActive?: boolean;
+  onRequestPlay?: () => void;
+  hideDownload?: boolean;
 }) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!lazy);
   const [error, setError] = useState<string | null>(null);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const signedUrlRef = useRef<string | null>(null);
+
+  const hasSource = userId || objectPath?.trim();
 
   const load = useCallback(async () => {
-    if (!objectPath?.trim()) {
+    if (!hasSource) {
       setLoading(false);
       setError('אין קובץ');
       return;
     }
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     setLoading(true);
     setError(null);
     try {
-      const { data, error: signErr } = await supabase.storage
-        .from('voice-intros')
-        .createSignedUrl(objectPath, SIGNED_TTL);
-      if (signErr || !data?.signedUrl) throw signErr ?? new Error('sign_failed');
+      let url: string;
+      if (userId) {
+        const res = await getAdminVoiceIntroSignedUrl(userId);
+        url = res.signedUrl;
+      } else {
+        const { data, error: signErr } = await supabase.storage
+          .from('voice-intros')
+          .createSignedUrl(objectPath!, SIGNED_TTL);
+        if (signErr || !data?.signedUrl) throw signErr ?? new Error('sign_failed');
+        url = data.signedUrl;
+      }
 
-      setSignedUrl(data.signedUrl);
+      if (ac.signal.aborted) return;
 
-      const res = await fetch(data.signedUrl);
+      setSignedUrl(url);
+      signedUrlRef.current = url;
+
+      const res = await fetch(url, { signal: ac.signal });
       if (!res.ok) throw new Error('fetch_failed');
       const arr = await res.arrayBuffer();
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (ac.signal.aborted) return;
+
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (Ctx) {
-        const ac = new Ctx();
-        const buf = await ac.decodeAudioData(arr.slice(0));
-        setAudioBuffer(buf);
-        await ac.close().catch(() => undefined);
+        const audioCtx = new Ctx();
+        const buf = await audioCtx.decodeAudioData(arr.slice(0));
+        if (!ac.signal.aborted) setAudioBuffer(buf);
+        await audioCtx.close().catch(() => undefined);
       }
+      if (!ac.signal.aborted) setLoaded(true);
     } catch (e) {
+      if (ac.signal.aborted) return;
       console.error('[VoiceIntroReviewPlayer]', e);
       setError('לא ניתן לטעון את ההקלטה');
     }
-    setLoading(false);
-  }, [objectPath]);
+    if (!ac.signal.aborted) setLoading(false);
+  }, [hasSource, userId, objectPath]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!lazy) void load();
+  }, [lazy, load]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -114,6 +150,31 @@ export function VoiceIntroReviewPlayer({
       el.removeEventListener('ended', end);
     };
   }, [signedUrl]);
+
+  useEffect(() => {
+    if (!isActive) {
+      const el = audioRef.current;
+      if (el) {
+        el.pause();
+        el.currentTime = 0;
+      }
+      setPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      const el = audioRef.current;
+      if (el) {
+        el.pause();
+        el.src = '';
+      }
+      setSignedUrl(null);
+      signedUrlRef.current = null;
+    };
+  }, []);
 
   const fmt = (s: number) => {
     const x = Math.max(0, Math.floor(s));
@@ -129,16 +190,29 @@ export function VoiceIntroReviewPlayer({
         ? audioBuffer.duration
         : 0;
 
-  const toggle = () => {
+  const startPlay = () => {
     const el = audioRef.current;
     if (!el) return;
+    onRequestPlay?.();
+    void el.play().catch(() => setPlaying(false));
+    setPlaying(true);
+  };
+
+  const toggle = async () => {
     if (playing) {
-      el.pause();
-      setPlaying(false);
-    } else {
-      void el.play().catch(() => setPlaying(false));
-      setPlaying(true);
+      const el = audioRef.current;
+      if (el) {
+        el.pause();
+        setPlaying(false);
+      }
+      return;
     }
+    if (!loaded && lazy) {
+      await load();
+      if (!signedUrlRef.current) return;
+    }
+    if (error || !signedUrlRef.current) return;
+    startPlay();
   };
 
   const handleDownload = async () => {
@@ -159,6 +233,19 @@ export function VoiceIntroReviewPlayer({
       console.error('[VoiceIntroReviewPlayer] download', e);
     }
   };
+
+  if (lazy && !loaded && !loading) {
+    return (
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10"
+      >
+        <Play className="h-3.5 w-3.5" />
+        השמע הקלטה
+      </button>
+    );
+  }
 
   if (loading) {
     return (
@@ -181,23 +268,25 @@ export function VoiceIntroReviewPlayer({
         <motion.button
           type="button"
           whileTap={{ scale: 0.96 }}
-          onClick={toggle}
+          onClick={() => void toggle()}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
-          aria-label={playing ? 'השהה' : 'נגן'}
+          aria-label={playing ? 'עצור' : 'נגן'}
         >
           {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ms-0.5" />}
         </motion.button>
         <p className="flex-1 font-mono text-xs text-muted-foreground">
           {fmt(currentTime)} / {totalDur > 0 ? fmt(totalDur) : durationSeconds ? fmt(durationSeconds) : '—'}
         </p>
-        <button
-          type="button"
-          onClick={() => void handleDownload()}
-          className="inline-flex items-center gap-1 rounded-xl border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60"
-        >
-          <Download className="h-3.5 w-3.5" />
-          הורדה
-        </button>
+        {!hideDownload && objectPath && (
+          <button
+            type="button"
+            onClick={() => void handleDownload()}
+            className="inline-flex items-center gap-1 rounded-xl border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60"
+          >
+            <Download className="h-3.5 w-3.5" />
+            הורדה
+          </button>
+        )}
       </div>
     </div>
   );

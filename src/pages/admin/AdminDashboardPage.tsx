@@ -7,6 +7,7 @@ import GlassCard from '@/components/clicks/GlassCard';
 import { useAdmin } from '@/contexts/AdminContext';
 import { getAdminStats } from '@/services/admin';
 import { UserReviewSection } from '@/components/admin/UserReviewSection';
+import { VoiceIntrosAdminSection } from '@/components/admin/VoiceIntrosAdminSection';
 import { AdminCreateGroupChatSection } from '@/components/admin/AdminCreateGroupChatSection';
 
 function CountUp({ target, duration = 600 }: { target: number; duration?: number }) {
@@ -86,6 +87,7 @@ export default function AdminDashboardPage() {
 
         <div className="mb-4 space-y-3">
           <UserReviewSection />
+          <VoiceIntrosAdminSection />
           <AdminCreateGroupChatSection />
         </div>
 
