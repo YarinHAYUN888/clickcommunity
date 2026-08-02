@@ -4,7 +4,6 @@ const CANDIDATES = [
   'audio/webm;codecs=opus',
   'audio/webm',
   'audio/mp4',
-  'audio/aac',
 ] as const;
 
 export function pickRecordingMimeType(): string {

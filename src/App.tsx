@@ -40,6 +40,7 @@ import AdminCommunityPage from "./pages/admin/AdminCommunityPage";
 import PendingReviewPage from "./pages/PendingReviewPage";
 import BlockedPage from "./pages/BlockedPage";
 import CompleteProfilePage from "./pages/CompleteProfilePage";
+import EventsAccessGate from "@/components/guards/EventsAccessGate";
 import SuitabilityGate from "@/components/guards/SuitabilityGate";
 import AdminRoute from "@/components/guards/AdminRoute";
 
@@ -76,10 +77,12 @@ const App = () => (
                 <Route element={<SuitabilityGate />}>
                   <Route element={<MainLayout />}>
                     <Route path="/clicks" element={<ClicksPage />} />
-                    <Route path="/events" element={<EventsPage />} />
                     <Route path="/events/create" element={<MemberEventFormPage />} />
-                    <Route path="/events/:eventId" element={<EventDetailPage />} />
-                    <Route path="/events/:eventId/vote" element={<EventVotePage />} />
+                    <Route element={<EventsAccessGate />}>
+                      <Route path="/events" element={<EventsPage />} />
+                      <Route path="/events/:eventId" element={<EventDetailPage />} />
+                      <Route path="/events/:eventId/vote" element={<EventVotePage />} />
+                    </Route>
                     <Route path="/chats" element={<ChatsPage />} />
                     <Route path="/chats/:chatId" element={<ChatConversationPage />} />
                     <Route path="/profile/edit" element={<EditProfilePage />} />

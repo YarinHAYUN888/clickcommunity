@@ -176,6 +176,7 @@ export function mapEdgeOtpError(edgeError?: string): OnboardingFlowErrorCode {
     case 'otp_invalid':
     case 'otp_expired':
     case 'challenge_not_found':
+    case 'identifier_mismatch':
       return 'otp_code_invalid';
     default:
       return 'otp_code_invalid';

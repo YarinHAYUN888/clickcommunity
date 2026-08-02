@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EventRegistrationError,
+  InsufficientClicksError,
   mapEventRegistrationErrorMessage,
   mapEventRegistrationResponse,
   isOpaqueEdgeInvokeMessage,
@@ -44,6 +45,16 @@ describe('mapEventRegistrationResponse', () => {
     ).toThrow(SubscriptionRequiredError);
   });
 
+  it('throws InsufficientClicksError for insufficient_clicks', () => {
+    expect(() =>
+      mapEventRegistrationResponse({
+        ok: false,
+        error_code: 'insufficient_clicks',
+        message: 'נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע',
+      }),
+    ).toThrow(InsufficientClicksError);
+  });
+
   it('throws EventRegistrationError with Hebrew message for server_error', () => {
     try {
       mapEventRegistrationResponse({
@@ -70,6 +81,9 @@ describe('mapEventRegistrationResponse', () => {
       expect(err).toBeInstanceOf(SubscriptionRequiredError);
     }
     expect(mapEventRegistrationErrorMessage('subscription_required')).toBe('אירוע זה דורש מנוי פעיל');
+    expect(mapEventRegistrationErrorMessage('insufficient_clicks')).toBe(
+      'נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע',
+    );
     expect(mapEventRegistrationErrorMessage('server_error')).toBe('לא הצלחנו להשלים את ההרשמה. נסה/י שוב');
   });
 });

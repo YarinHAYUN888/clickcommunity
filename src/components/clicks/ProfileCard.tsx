@@ -29,6 +29,7 @@ interface ProfileCardProps {
   /** Someone liked the viewer — show badge */
   likedYou?: boolean;
   swipeBusy?: boolean;
+  alreadyClicked?: boolean;
   onSwipe?: (action: SwipeAction) => void | Promise<void>;
   onViewProfile: () => void;
   onIcebreaker: () => void;
@@ -47,6 +48,7 @@ export default function ProfileCard({
   hasUnreadDm,
   likedYou,
   swipeBusy,
+  alreadyClicked,
   onSwipe,
   onViewProfile,
   onIcebreaker,
@@ -241,12 +243,12 @@ export default function ProfileCard({
               </motion.button>
               <motion.button
                 type="button"
-                disabled={!!swipeBusy}
-                whileTap={{ scale: swipeBusy ? 1 : 0.95 }}
+                disabled={!!swipeBusy || !!alreadyClicked}
+                whileTap={{ scale: swipeBusy || alreadyClicked ? 1 : 0.95 }}
                 transition={springs.snappy}
                 onClick={(e) => handleSwipeClick(e, 'like')}
                 className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-md disabled:opacity-50 touch-manipulation"
-                title="לייק"
+                title={alreadyClicked ? 'כבר ביצעת קליק' : 'לייק'}
               >
                 <Heart size={22} className="fill-current" />
               </motion.button>

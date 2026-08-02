@@ -6,7 +6,7 @@ import {
   mapIssueOtpError,
 } from '@/lib/onboarding/onboardingErrors';
 import { ONBOARDING_STEP_LABELS } from '@/lib/onboarding/onboardingFlowDebug';
-import { buildIssueOtpInvokeBody, resolveIssueOtpErrorCode } from '@/services/otpDelivery';
+import { buildIssueOtpInvokeBody, normalizeIsraeliPhoneE164, resolveIssueOtpErrorCode } from '@/services/otpDelivery';
 
 describe('onboardingErrors', () => {
   it('classifyOtpWebhookFailure timeout', () => {
@@ -109,6 +109,25 @@ describe('otpDelivery buildIssueOtpInvokeBody (Contract A)', () => {
     expect(body.email).toBeUndefined();
     expect(body.phone).toBe('+972521234567');
     expect(body.verificationMethod).toBeUndefined();
+  });
+
+  it('sms payload normalizes +972 prefix without doubling', () => {
+    const body = buildIssueOtpInvokeBody({ ...sample, phone: '+972521234567' }, 'phone');
+    expect(body.phone).toBe('+972521234567');
+  });
+});
+
+describe('normalizeIsraeliPhoneE164', () => {
+  it('accepts local 05 format', () => {
+    expect(normalizeIsraeliPhoneE164('0521234567')).toBe('+972521234567');
+  });
+
+  it('accepts E.164 format', () => {
+    expect(normalizeIsraeliPhoneE164('+972521234567')).toBe('+972521234567');
+  });
+
+  it('rejects invalid numbers', () => {
+    expect(normalizeIsraeliPhoneE164('123')).toBeNull();
   });
 });
 

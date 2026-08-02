@@ -1,6 +1,6 @@
 import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { User, Edit3, LogOut, Loader2, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { User, Edit3, LogOut, Loader2, Calendar, ChevronLeft, ChevronRight, Heart } from 'lucide-react';
 import { SkeletonProfileCard } from '@/components/ui/SkeletonPresets';
 import GlassCard from '@/components/clicks/GlassCard';
 import InterestPill from '@/components/clicks/InterestPill';
@@ -12,6 +12,10 @@ import { getInterestEmoji } from '@/hooks/useClicksFeed';
 import { normalizeInterestLabels, normalizePhotoUrls } from '@/lib/profileFieldNormalization';
 import { lifeNicheLabel } from '@/data/lifeNiche';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useIncomingClickCount } from '@/hooks/useIncomingClickCount';
+import { EVENT_ACCESS_MIN_INCOMING_CLICKS } from '@/config/clicks';
+import { recordProfileSwipe, getOutgoingLikeUserIds } from '@/services/clicksSwipe';
+import { toast } from 'sonner';
 
 interface ProfileStats {
   events_attended: number;
@@ -81,12 +85,19 @@ export default function ProfilePage() {
   const { userId: paramUserId } = useParams();
   const { profile: cachedProfile, authId } = useCurrentUser();
   const isOwnProfile = !paramUserId || paramUserId === authId;
+  const isAdmin = !!cachedProfile?.super_role || cachedProfile?.role === 'admin';
+  const { displayCount, hasAccess: hasEventAccess, stats: clickStats } = useIncomingClickCount(
+    isOwnProfile ? authId : null,
+    isAdmin,
+  );
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState<ProfileStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [noSession, setNoSession] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
+  const [swipeBusy, setSwipeBusy] = useState(false);
+  const [alreadyClicked, setAlreadyClicked] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -154,6 +165,38 @@ export default function ProfilePage() {
       mounted = false;
     };
   }, [paramUserId, cachedProfile]);
+
+  useEffect(() => {
+    if (!authId || isOwnProfile || !paramUserId) {
+      setAlreadyClicked(false);
+      return;
+    }
+    let cancelled = false;
+    getOutgoingLikeUserIds(authId).then((ids) => {
+      if (!cancelled) setAlreadyClicked(ids.has(paramUserId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authId, isOwnProfile, paramUserId]);
+
+  const handleLikeClick = async () => {
+    if (!authId || !paramUserId || isOwnProfile || swipeBusy || alreadyClicked) return;
+    setSwipeBusy(true);
+    try {
+      const r = await recordProfileSwipe(paramUserId, 'like');
+      if (r.already_clicked) {
+        setAlreadyClicked(true);
+      } else {
+        setAlreadyClicked(true);
+        toast.success('שלחת לייק! 💜');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'הפעולה נכשלה');
+    } finally {
+      setSwipeBusy(false);
+    }
+  };
 
   if (paramUserId === 'edit') {
     return <Navigate to="/profile/edit" replace />;
@@ -261,7 +304,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Completion ring overlay */}
-        {completion < 100 && (
+        {isOwnProfile && completion < 100 && (
           <div className="absolute top-4 right-4 z-20">
             <div className="relative">
               <CompletionRing percentage={completion} size={52} />
@@ -273,20 +316,45 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* Edit button */}
+      {/* Edit / Like button */}
       <div className="px-4 mt-3">
-        <button
-          onClick={() => navigate('/profile/edit')}
-          className="w-full glass rounded-xl py-3 flex items-center justify-center gap-2 text-sm font-medium text-primary active:scale-[0.97] transition-transform border border-primary/10"
-        >
-          <Edit3 size={15} />
-          ערוך פרופיל
-        </button>
+        {isOwnProfile ? (
+          <button
+            onClick={() => navigate('/profile/edit')}
+            className="w-full glass rounded-xl py-3 flex items-center justify-center gap-2 text-sm font-medium text-primary active:scale-[0.97] transition-transform border border-primary/10"
+          >
+            <Edit3 size={15} />
+            ערוך פרופיל
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={swipeBusy || alreadyClicked}
+            onClick={() => void handleLikeClick()}
+            className="w-full gradient-primary rounded-xl py-3 flex items-center justify-center gap-2 text-sm font-medium text-primary-foreground active:scale-[0.97] transition-transform disabled:opacity-50"
+          >
+            {swipeBusy ? <Loader2 size={15} className="animate-spin" /> : <Heart size={15} className="fill-current" />}
+            {alreadyClicked ? 'כבר ביצעת קליק' : 'שלח/י קליק'}
+          </button>
+        )}
       </div>
 
       {/* Stats */}
       <div className="px-4 mt-4 space-y-3">
-        {completion < 100 && (
+        {isOwnProfile && (
+          <GlassCard variant="strong" className="p-3">
+            <p className="text-sm text-center text-muted-foreground">
+              קליקים נכנסים:{' '}
+              <span className="font-semibold text-foreground tabular-nums">
+                {displayCount}/{EVENT_ACCESS_MIN_INCOMING_CLICKS}
+              </span>
+              {hasEventAccess || clickStats.event_access_unlocked_at
+                ? ' — גישה לאירועים פתוחה'
+                : ` — נדרשים ${EVENT_ACCESS_MIN_INCOMING_CLICKS} קליקים לגישה לאירועים`}
+            </p>
+          </GlassCard>
+        )}
+        {isOwnProfile && completion < 100 && (
           <p className="text-xs text-primary text-center cursor-pointer" onClick={() => navigate('/profile/edit')}>
             הפרופיל שלך {completion}% מלא — לחץ/י להשלמה
           </p>
@@ -338,6 +406,7 @@ export default function ProfilePage() {
         </GlassCard>
 
         {/* Logout */}
+        {isOwnProfile && (
         <button
           onClick={async () => {
             await clearOnboardingDurableState();
@@ -349,6 +418,7 @@ export default function ProfilePage() {
           <LogOut size={15} />
           התנתק/י
         </button>
+        )}
       </div>
     </div>
   );

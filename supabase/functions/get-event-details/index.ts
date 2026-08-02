@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { userHasEventAccess } from "../_shared/eventAccess.ts";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
 Deno.serve(async (req) => {
@@ -38,13 +39,28 @@ Deno.serve(async (req) => {
     }
 
     let isSuperUser = false;
+    let viewerProfile: { super_role?: boolean | null; role?: string | null } | null = null;
     if (userId) {
-      const { data: viewerProfile } = await supabase
+      const { data: vp } = await supabase
         .from("profiles")
-        .select("super_role")
+        .select("super_role, role")
         .eq("user_id", userId)
         .maybeSingle();
-      isSuperUser = !!viewerProfile?.super_role;
+      viewerProfile = vp;
+      isSuperUser = !!vp?.super_role;
+    }
+
+    if (userId && !isSuperUser) {
+      const allowed = await userHasEventAccess(supabase, userId, viewerProfile);
+      if (!allowed) {
+        return new Response(
+          JSON.stringify({
+            error: "insufficient_clicks",
+            message: "נדרשים 5 קליקים ממשתמשים אחרים כדי לצפות באירוע",
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     }
 
     const { data: registrations } = await supabase

@@ -65,6 +65,36 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "invalid_action" }), { status: 400, headers: corsHeaders });
     }
 
+    const { data: existingSwipe } = await supabaseAdmin
+      .from("profile_swipes")
+      .select("action")
+      .eq("from_user_id", userId)
+      .eq("to_user_id", toUserId)
+      .maybeSingle();
+
+    if (
+      isLikeAction(action) &&
+      existingSwipe &&
+      isLikeAction(existingSwipe.action as string)
+    ) {
+      console.log("CLICKS ACTION ALREADY_CLICKED", { from: userId, to: toUserId });
+      let mutual = false;
+      let chat_id: string | null = null;
+      if (isLikeAction(action)) {
+        const { data: rev } = await supabaseAdmin
+          .from("profile_swipes")
+          .select("action")
+          .eq("from_user_id", toUserId)
+          .eq("to_user_id", userId)
+          .maybeSingle();
+        if (rev && isLikeAction(rev.action as string)) mutual = true;
+      }
+      return new Response(
+        JSON.stringify({ ok: true, already_clicked: true, mutual, chat_id }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     console.log("CLICKS ACTION START", { action, from: userId, to: toUserId });
 
     const { data: meProf, error: meErr } = await supabaseAdmin

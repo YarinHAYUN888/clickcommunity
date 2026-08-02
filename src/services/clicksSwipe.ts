@@ -7,6 +7,7 @@ export interface RecordSwipeResult {
   ok: boolean;
   mutual: boolean;
   chat_id: string | null;
+  already_clicked?: boolean;
 }
 
 function parseSwipeResponse(data: unknown, fnError: unknown): Record<string, unknown> | null {
@@ -21,11 +22,27 @@ function friendlySwipeError(code: string): string {
   if (code.includes('Shadow isolation')) return 'לא ניתן לבצע פעולה זו כרגע';
   if (code === 'not_approved' || code === 'target_unavailable') return 'לא ניתן לבצע פעולה זו כרגע';
   if (code === 'suspended') return 'לא ניתן לבצע פעולה זו כרגע';
+  if (code === 'cannot_swipe_self') return 'לא ניתן לבצע קליק לעצמך';
   return 'הפעולה נכשלה. נסה/י שוב';
 }
 
 function isLikeAction(action: SwipeAction): boolean {
   return action === 'like' || action === 'super_like';
+}
+
+function isBusinessSwipeError(code: string): boolean {
+  return (
+    code === 'target_unavailable' ||
+    code === 'suspended' ||
+    code === 'target_not_found' ||
+    code === 'profile_not_found' ||
+    code === 'cannot_swipe_self' ||
+    code.includes('Shadow isolation')
+  );
+}
+
+function isNetworkOrAuthFallbackError(code: string): boolean {
+  return code === 'not_approved' || code.includes('Unauthorized');
 }
 
 /** Direct DB write when Edge Function is unavailable (RLS allows own outgoing swipes). */
@@ -93,7 +110,7 @@ export async function recordProfileSwipe(toUserId: string, action: SwipeAction):
   const body = parseSwipeResponse(data, error);
   if (typeof body?.error === 'string' && body.error) {
     console.warn('CLICKS ACTION FAILED', { path: 'edge', error: body.error });
-    if (body.error === 'not_approved' || body.error.includes('Unauthorized')) {
+    if (isNetworkOrAuthFallbackError(body.error)) {
       return recordProfileSwipeDirect(session.user.id, toUserId, action);
     }
     throw new Error(friendlySwipeError(body.error));
@@ -103,16 +120,37 @@ export async function recordProfileSwipe(toUserId: string, action: SwipeAction):
     return {
       ok: true,
       mutual: body.mutual === true,
+      already_clicked: body.already_clicked === true,
       chat_id: typeof body.chat_id === 'string' ? body.chat_id : null,
     };
   }
 
   if (error) {
     console.warn('CLICKS ACTION FAILED', { path: 'edge_invoke', message: error.message });
-    return recordProfileSwipeDirect(session.user.id, toUserId, action);
+    const msg = error.message?.toLowerCase() ?? '';
+    if (msg.includes('unauthorized') || msg.includes('jwt')) {
+      return recordProfileSwipeDirect(session.user.id, toUserId, action);
+    }
+    throw new Error('הפעולה נכשלה. בדקו חיבור לאינטרנט ונסו שוב');
   }
 
   throw new Error('הפעולה נכשלה. נסה/י שוב');
+}
+
+/** User IDs the viewer already liked (outgoing likes). */
+export async function getOutgoingLikeUserIds(viewerId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('profile_swipes')
+    .select('to_user_id')
+    .eq('from_user_id', viewerId)
+    .in('action', ['like', 'super_like']);
+
+  if (error) {
+    if (import.meta.env.DEV) console.warn('[getOutgoingLikeUserIds]', error.message);
+    return new Set();
+  }
+
+  return new Set((data ?? []).map((r) => r.to_user_id).filter(Boolean) as string[]);
 }
 
 /** User IDs who liked the current user (incoming likes). */

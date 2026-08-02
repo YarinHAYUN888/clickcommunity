@@ -602,6 +602,13 @@ export class SubscriptionValidationUnavailableError extends Error {
   }
 }
 
+export class InsufficientClicksError extends Error {
+  constructor(message?: string) {
+    super(message ?? 'נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע');
+    this.name = 'InsufficientClicksError';
+  }
+}
+
 export class EventRegistrationError extends Error {
   readonly errorCode: string;
   constructor(errorCode: string, message: string) {
@@ -670,6 +677,9 @@ export function mapEventRegistrationResponse(body: Record<string, unknown>): Eve
     if (code === 'subscription_validation_unavailable') {
       throw new SubscriptionValidationUnavailableError();
     }
+    if (code === 'insufficient_clicks') {
+      throw new InsufficientClicksError(message);
+    }
     throw new EventRegistrationError(code, message);
   }
 
@@ -711,6 +721,10 @@ export function mapEventRegistrationErrorMessage(
       return 'ההרשמה לאירוע הסתיימה';
     case 'user_not_allowed':
       return 'אין אפשרות להירשם לאירוע זה';
+    case 'insufficient_clicks':
+      return typeof body?.message === 'string'
+        ? body.message
+        : 'נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע';
     case 'event_not_found':
       return 'האירוע לא נמצא';
     case 'invalid_request':

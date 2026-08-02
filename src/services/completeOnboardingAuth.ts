@@ -34,6 +34,7 @@ export type PostOtpRegistrationResult = {
   imageUploadStatus: 'pending' | 'success' | 'failed';
   sessionEstablished: boolean;
   route: PostAuthRoute;
+  voiceUploadOk?: boolean;
   failureStage?: AuthCompletionFailureStage;
 };
 
@@ -223,11 +224,16 @@ export async function runPostOtpRegistration(
     throw new Error('profile_save_failed');
   }
 
+  let voiceUploadOk = true;
   if (voiceBlob) {
     try {
-      await uploadVoiceIntroAfterProfile(userId, voiceBlob);
+      voiceUploadOk = await uploadVoiceIntroAfterProfile(userId, voiceBlob);
+      if (!voiceUploadOk) {
+        console.warn('[runPostOtpRegistration] voice upload failed — keeping local draft');
+      }
     } catch (voiceErr) {
       console.error('[runPostOtpRegistration] voice upload failed:', voiceErr);
+      voiceUploadOk = false;
     }
   }
 
@@ -270,6 +276,7 @@ export async function runPostOtpRegistration(
     imageUploadStatus,
     sessionEstablished: true,
     route,
+    voiceUploadOk,
   };
 }
 

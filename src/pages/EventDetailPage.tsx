@@ -6,9 +6,11 @@ import GlassCard from '@/components/clicks/GlassCard';
 import StatusBadge from '@/components/clicks/StatusBadge';
 import AttendeesModal from '@/components/clicks/AttendeesModal';
 import EventClicksSection from '@/components/clicks/EventClicksSection';
-import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError, applyEventDetailSecondarySettled, isEventRegistrationClosed } from '@/services/events';
+import { EventRow, getEventById, getEventStats, getEventAttendees, getUserRegistration, getEventPhotos, registerForEvent, cancelEventRegistration, downloadIcs, EventStats, EventRegistration, getMyMonthlyEventRegistrationUsage, MonthlyEventLimitError, EventCancellationLockedError, SubscriptionRequiredError, SubscriptionValidationUnavailableError, EventRegistrationError, InsufficientClicksError, applyEventDetailSecondarySettled, isEventRegistrationClosed } from '@/services/events';
 import { createOrGetDm } from '@/services/chat';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useIncomingClickCount } from '@/hooks/useIncomingClickCount';
+import { EVENT_ACCESS_MIN_INCOMING_CLICKS } from '@/config/clicks';
 import { useUserMode } from '@/hooks/useUserMode';
 import { useAdmin } from '@/contexts/AdminContext';
 import { canViewEventParticipantStats } from '@/lib/eventPermissions';
@@ -20,7 +22,9 @@ import { QRCodeSVG } from 'qrcode.react';
 export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const { authId, role } = useCurrentUser();
+  const { authId, role, profile } = useCurrentUser();
+  const isAdmin = !!profile?.super_role || profile?.role === 'admin';
+  const { loading: accessLoading, hasAccess, displayCount } = useIncomingClickCount(authId, isAdmin);
   const { isShadowUser } = useUserMode();
   const { superRole } = useAdmin();
   const canViewStats = canViewEventParticipantStats(superRole);
@@ -41,7 +45,11 @@ export default function EventDetailPage() {
   const [monthlyUsage, setMonthlyUsage] = useState<{ used: number; cap: number } | null>(null);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (!eventId || accessLoading) return;
+    if (!hasAccess) {
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
@@ -82,7 +90,7 @@ export default function EventDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [eventId, authId, canViewStats, isShadowUser]);
+  }, [eventId, authId, canViewStats, isShadowUser, accessLoading, hasAccess]);
 
   useEffect(() => {
     if (role !== 'member' || !authId) {
@@ -199,6 +207,8 @@ export default function EventDetailPage() {
         });
       } else if (err instanceof SubscriptionValidationUnavailableError) {
         sonner.error('לא הצלחנו לאמת מנוי כרגע. נסו שוב בעוד רגע.');
+      } else if (err instanceof InsufficientClicksError) {
+        sonner.error(err.message);
       } else if (err instanceof EventRegistrationError) {
         toast({ title: 'שגיאה', description: err.message, variant: 'destructive' });
       } else {
@@ -232,6 +242,42 @@ export default function EventDetailPage() {
       setPendingDmFor(null);
     }
   };
+
+  if (accessLoading) {
+    return (
+      <div className="min-h-screen pb-4">
+        <Skeleton className="h-60 w-full" />
+        <div className="p-6 space-y-4">
+          <Skeleton className="h-7 w-3/4" />
+          <Skeleton className="h-5 w-1/2" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasAccess) {
+    return (
+      <div className="min-h-screen gradient-bg pb-24 flex items-center justify-center px-6" dir="rtl">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-4">
+            <Lock size={32} className="text-primary" />
+          </div>
+          <h2 className="text-lg font-semibold text-foreground mb-2">האירועים נעולים</h2>
+          <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+            נדרשים {EVENT_ACCESS_MIN_INCOMING_CLICKS} קליקים כדי להיכנס לאירוע. יש לך {displayCount} מתוך{' '}
+            {EVENT_ACCESS_MIN_INCOMING_CLICKS}.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/clicks')}
+            className="gradient-primary text-primary-foreground px-6 py-3 rounded-full text-sm font-medium"
+          >
+            לקליקים שלי
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

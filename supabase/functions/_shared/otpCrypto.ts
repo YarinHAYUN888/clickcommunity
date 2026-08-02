@@ -29,6 +29,15 @@ export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim().toLowerCase());
 }
 
+/** Israeli mobile → E.164 (+9725XXXXXXXX). Accepts 05XXXXXXXX and +9725XXXXXXXX. */
+export function normalizePhoneE164(raw: string): string | null {
+  const stripped = raw.replace(/[-\s]/g, "");
+  if (/^\+9725\d{8}$/.test(stripped)) return stripped;
+  const local = stripped.replace(/^0/, "");
+  if (/^5\d{8}$/.test(local)) return `+972${local}`;
+  return null;
+}
+
 /** Channel-strict: email path never falls back to phone and vice versa. */
 export function normalizeIdentifier(
   email?: string,
@@ -45,11 +54,13 @@ export function normalizeIdentifier(
   }
 
   if (ch === "phone" || ch === "sms") {
-    if (p && /^\+9725\d{8}$/.test(p)) return `phone:${p}`;
+    const normalized = normalizePhoneE164(p);
+    if (normalized) return `phone:${normalized}`;
     return null;
   }
 
   if (e && isValidEmail(e)) return `email:${e}`;
-  if (p && /^\+9725\d{8}$/.test(p)) return `phone:${p}`;
+  const normalizedPhone = normalizePhoneE164(p);
+  if (normalizedPhone) return `phone:${normalizedPhone}`;
   return null;
 }

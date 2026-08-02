@@ -6,6 +6,7 @@ import {
   hashOtpCode,
   isValidEmail,
   normalizeIdentifier,
+  normalizePhoneE164,
 } from "./otpCrypto.ts";
 import { getRequestMeta } from "./requestMeta.ts";
 import { checkRateLimit } from "./securityRateLimit.ts";
@@ -194,8 +195,9 @@ export async function handleIssueOtp(req: Request): Promise<Response> {
 
   const email =
     typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const phone =
+  const phoneRaw =
     typeof body.phone === "string" ? body.phone.trim() : "";
+  const phone = normalizePhoneE164(phoneRaw) ?? phoneRaw;
 
   if (!channel && email) {
     channel = "email";
@@ -363,7 +365,7 @@ export async function handleVerifyOtp(req: Request): Promise<Response> {
       : undefined;
   const phone =
     channel === "phone" && typeof body.phone === "string"
-      ? body.phone.trim()
+      ? (normalizePhoneE164(body.phone.trim()) ?? body.phone.trim())
       : undefined;
 
   if (!channel) {

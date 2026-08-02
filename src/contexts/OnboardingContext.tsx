@@ -6,6 +6,10 @@ import {
   ONBOARDING_SESSION_LS_KEY,
   ONBOARDING_PHOTO_COUNT_LS_KEY,
 } from '@/lib/onboardingPhotoStore';
+import {
+  clearOnboardingVoice,
+  loadOnboardingVoice,
+} from '@/lib/onboardingVoiceStore';
 
 /** In-memory only — holds recorded voice blob until post-auth upload (never persisted to localStorage). */
 export type VoiceIntroDraft = {
@@ -152,6 +156,24 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     }
   }, [data]);
 
+  // Hydrate voice intro from durable storage on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (voiceIntroDraftRef.current) return;
+      const record = await loadOnboardingVoice(sessionIdRef.current);
+      if (cancelled || !record) return;
+      voiceIntroDraftRef.current = {
+        blob: record.blob,
+        durationSec: record.durationSec,
+        mimeType: record.mimeType,
+      };
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Hydrate photos from durable storage on mount (refresh / app-switch recovery).
   // Newer in-memory selections always win: only restore when nothing is in memory yet.
   useEffect(() => {
@@ -193,6 +215,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     setData(defaultData);
     localStorage.removeItem(STORAGE_KEY);
     void clearOnboardingPhotos();
+    void clearOnboardingVoice();
     try {
       localStorage.removeItem(PHOTO_COUNT_KEY);
       localStorage.removeItem(SESSION_KEY);

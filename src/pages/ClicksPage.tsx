@@ -13,7 +13,7 @@ import { useCompatibilityLayer } from '@/hooks/useCompatibilityLayer';
 import { useNavigate } from 'react-router-dom';
 import { getUnreadMessageFromUserIds, partnerPreviewFromProfile } from '@/services/chat';
 import { CHAT_UNREAD_REFRESH_EVENT, notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
-import { recordProfileSwipe, SwipeAction } from '@/services/clicksSwipe';
+import { recordProfileSwipe, getOutgoingLikeUserIds, SwipeAction } from '@/services/clicksSwipe';
 import { toast } from 'sonner';
 
 export default function ClicksPage() {
@@ -36,6 +36,7 @@ export default function ClicksPage() {
   const loading =
     (!authId && userLoading) || (tab === 'general' ? feedLoading : eventTabLoading);
   const [swipeBusyUserId, setSwipeBusyUserId] = useState<string | null>(null);
+  const [outgoingLikes, setOutgoingLikes] = useState<Set<string>>(() => new Set());
 
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -86,6 +87,20 @@ export default function ClicksPage() {
     };
   }, [authId, feedUserIdsKey, feedUserIds.length]);
 
+  useEffect(() => {
+    if (!authId) {
+      setOutgoingLikes(new Set());
+      return;
+    }
+    let cancelled = false;
+    getOutgoingLikeUserIds(authId).then((ids) => {
+      if (!cancelled) setOutgoingLikes(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authId]);
+
   const handleSwipe = useCallback(
     async (toUserId: string, action: SwipeAction) => {
       if (!authId) {
@@ -105,10 +120,18 @@ export default function ClicksPage() {
         setProfileOpen(false);
 
         const r = await recordProfileSwipe(toUserId, action);
-        console.info('CLICKS ACTION SAVED', { toUserId, action, mutual: r.mutual, chat_id: r.chat_id });
+        console.info('CLICKS ACTION SAVED', {
+          toUserId,
+          action,
+          mutual: r.mutual,
+          chat_id: r.chat_id,
+          already_clicked: r.already_clicked,
+        });
 
         if (action === 'pass') {
           toast.success('הפרופיל הוסר מהקליקים');
+        } else if (r.already_clicked) {
+          setOutgoingLikes((prev) => new Set(prev).add(toUserId));
         } else if (r.mutual) {
           if (r.chat_id) {
             toast.success('יש התאמה! 💜', {
@@ -123,7 +146,8 @@ export default function ClicksPage() {
           } else {
             toast.success('יש התאמה! 💜');
           }
-        } else {
+        } else if (!r.already_clicked) {
+          setOutgoingLikes((prev) => new Set(prev).add(toUserId));
           toast.success('שלחת לייק! 💜', {
             action: r.chat_id
               ? {
@@ -309,6 +333,7 @@ export default function ClicksPage() {
                   hasUnreadDm={!!unreadFromUser[item.profile.user_id]}
                   likedYou={!!item.likedYou}
                   swipeBusy={swipeBusyUserId === item.profile.user_id}
+                  alreadyClicked={outgoingLikes.has(item.profile.user_id)}
                   onSwipe={(action) => handleSwipe(item.profile.user_id, action)}
                   matchEnrichment={activeMatchByUserId[item.profile.user_id] ?? null}
                   onViewProfile={() => { setProfileTarget(item); setProfileOpen(true); }}
@@ -348,6 +373,7 @@ export default function ClicksPage() {
           sharedInterests={profileTarget.sharedInterests}
           isMember={isMember}
           swipeBusy={swipeBusyUserId === profileTarget.profile.user_id}
+          alreadyClicked={outgoingLikes.has(profileTarget.profile.user_id)}
           onSwipe={(action) => handleSwipe(profileTarget.profile.user_id, action)}
           matchEnrichment={matchByUserId[profileTarget.profile.user_id] ?? null}
         />

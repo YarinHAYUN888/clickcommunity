@@ -67,9 +67,13 @@ type IssueOtpEdgeBody = {
   retry_after_sec?: number;
 };
 
-function phoneE164(phone: string): string {
-  const cleaned = phone.replace(/[-\s]/g, '').replace(/^0/, '');
-  return cleaned ? `+972${cleaned}` : '';
+/** Normalize Israeli mobile to E.164 (+9725XXXXXXXX). Supports 05XXXXXXXX and +9725XXXXXXXX. */
+export function normalizeIsraeliPhoneE164(phone: string): string | null {
+  const stripped = phone.replace(/[-\s]/g, '');
+  if (/^\+9725\d{8}$/.test(stripped)) return stripped;
+  const local = stripped.replace(/^0/, '');
+  if (/^5\d{8}$/.test(local)) return `+972${local}`;
+  return null;
 }
 
 export function toOtpApiChannel(method: VerificationChannel): OtpApiChannel {
@@ -108,10 +112,10 @@ export function buildIssueOtpInvokeBody(
     };
   }
 
-  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  const phoneNormalized = normalizeIsraeliPhoneE164(data.phone ?? '');
   return {
     channel: 'sms',
-    phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+    phone: phoneNormalized ?? undefined,
     registration_session_id: registrationSessionId,
     ...profile,
   };
@@ -136,10 +140,10 @@ export function buildVerifyOtpInvokeBody(
     return { ...base, email: (data.email ?? '').trim().toLowerCase() };
   }
 
-  const phoneClean = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
+  const phoneNormalized = normalizeIsraeliPhoneE164(data.phone ?? '');
   return {
     ...base,
-    phone: phoneClean ? phoneE164(data.phone ?? '') : undefined,
+    phone: phoneNormalized ?? undefined,
   };
 }
 

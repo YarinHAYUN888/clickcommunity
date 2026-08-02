@@ -817,6 +817,27 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_click_stats: {
+        Row: {
+          user_id: string
+          incoming_click_count: number
+          event_access_unlocked_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          incoming_click_count?: number
+          event_access_unlocked_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          incoming_click_count?: number
+          event_access_unlocked_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profile_swipes: {
         Row: {
           action: string
@@ -1063,6 +1084,42 @@ export type Database = {
           referred_user_id?: string | null
           referrer_id?: string
           status?: string | null
+        }
+        Relationships: []
+      }
+      user_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          title: string
+          body: string
+          dedupe_key: string
+          read_at: string | null
+          created_at: string
+          metadata: Json
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          title: string
+          body: string
+          dedupe_key: string
+          read_at?: string | null
+          created_at?: string
+          metadata?: Json
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: string
+          title?: string
+          body?: string
+          dedupe_key?: string
+          read_at?: string | null
+          created_at?: string
+          metadata?: Json
         }
         Relationships: []
       }

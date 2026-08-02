@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { jsonResponse, optionsOk, requireAuthUser } from "../_shared/edgeAuth.ts";
+import { userHasEventAccess } from "../_shared/eventAccess.ts";
 
 function generateUniqueCode() {
   return "EVT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -168,6 +169,15 @@ Deno.serve(async (req) => {
     const role = profile?.super_role ? "admin" : profile?.role;
     const requiresSubscription = event.requires_subscription === true;
     console.log("SUBSCRIPTION REQUIRED", requiresSubscription);
+
+    const hasEventAccess = await userHasEventAccess(admin, userId, profile);
+    if (!hasEventAccess) {
+      return jsonResponse({
+        ok: false,
+        error_code: "insufficient_clicks",
+        message: "נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע",
+      });
+    }
 
     if (requiresSubscription && role !== "admin") {
       const { data: activeSubscription, error: subError } = await admin

@@ -3,9 +3,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import BottomTabBar from '@/components/clicks/BottomTabBar';
 import PremiumBackground from '@/components/ui/PremiumBackground';
 import { ChatUnreadProvider } from '@/contexts/ChatUnreadContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNotifications } from '@/hooks/useNotifications';
 
 export default function MainLayout() {
   const location = useLocation();
+  const { authId } = useCurrentUser();
+  useNotifications(authId);
 
   return (
     <ChatUnreadProvider>

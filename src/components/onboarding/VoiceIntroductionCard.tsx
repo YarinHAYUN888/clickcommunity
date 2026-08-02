@@ -7,8 +7,20 @@ import {
   VOICE_INTRO_MIN_SEC,
   VOICE_INTRO_MAX_SEC,
 } from '@/services/voiceIntroRecording';
+import {
+  clearOnboardingVoice,
+  loadOnboardingVoice,
+  saveOnboardingVoice,
+} from '@/lib/onboardingVoiceStore';
 
-type Phase = 'idle' | 'recording' | 'recorded' | 'unsupported';
+type Phase =
+  | 'idle'
+  | 'requesting_permission'
+  | 'recording'
+  | 'saving'
+  | 'recorded'
+  | 'unsupported'
+  | 'error';
 
 function formatClock(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -17,14 +29,21 @@ function formatClock(sec: number): string {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
+function isPermissionDeniedError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const name = (e as { name?: string }).name;
+  return name === 'NotAllowedError' || name === 'PermissionDeniedError';
+}
+
 export function VoiceIntroductionCard() {
-  const { voiceIntroDraftRef } = useOnboarding();
+  const { voiceIntroDraftRef, getOnboardingSessionId } = useOnboarding();
   const [phase, setPhase] = useState<Phase>('idle');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [permissionNote, setPermissionNote] = useState<string | null>(null);
   const [shortRecordingNote, setShortRecordingNote] = useState(false);
+  const [busyNote, setBusyNote] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -37,6 +56,7 @@ export function VoiceIntroductionCard() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
+  const recordingInFlightRef = useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -68,6 +88,30 @@ export function VoiceIntroductionCard() {
     [revokePreviewUrl],
   );
 
+  // Restore recorded draft after refresh (IndexedDB + in-memory ref).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const sessionId = getOnboardingSessionId();
+      if (!voiceIntroDraftRef.current) {
+        const record = await loadOnboardingVoice(sessionId);
+        if (cancelled || !record) return;
+        voiceIntroDraftRef.current = {
+          blob: record.blob,
+          durationSec: record.durationSec,
+          mimeType: record.mimeType,
+        };
+      }
+      const draft = voiceIntroDraftRef.current;
+      if (!draft || cancelled) return;
+      replacePreviewUrl(URL.createObjectURL(draft.blob));
+      setPhase('recorded');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [getOnboardingSessionId, voiceIntroDraftRef, replacePreviewUrl]);
+
   const cleanupStream = useCallback(() => {
     if (tickRef.current) {
       clearInterval(tickRef.current);
@@ -92,6 +136,7 @@ export function VoiceIntroductionCard() {
     }
     audioCtxRef.current = null;
     analyserRef.current = null;
+    recordingInFlightRef.current = false;
   }, []);
 
   useEffect(() => () => cleanupStream(), [cleanupStream]);
@@ -142,12 +187,58 @@ export function VoiceIntroductionCard() {
     rafRef.current = requestAnimationFrame(render);
   }, []);
 
+  const checkMicrophonePermission = useCallback(async (): Promise<'granted' | 'prompt' | 'denied'> => {
+    if (!navigator.permissions?.query) return 'prompt';
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      if (status.state === 'granted') return 'granted';
+      if (status.state === 'denied') return 'denied';
+      return 'prompt';
+    } catch {
+      return 'prompt';
+    }
+  }, []);
+
+  const persistDraft = useCallback(
+    async (blob: Blob, durationSec: number, mime: string) => {
+      setPhase('saving');
+      setBusyNote('שומרים ההקלטה מקומית...');
+      try {
+        await saveOnboardingVoice(getOnboardingSessionId(), blob, durationSec, mime);
+        console.info('[voiceIntro] draft_saved_local', { bytes: blob.size, durationSec });
+      } catch (e) {
+        console.warn('[voiceIntro] draft_save_local_failed', e);
+      }
+      setBusyNote(null);
+    },
+    [getOnboardingSessionId],
+  );
+
   const startRecording = useCallback(async () => {
+    if (recordingInFlightRef.current || phase === 'recording' || phase === 'requesting_permission' || phase === 'saving') {
+      console.info('[voiceIntro] recording_blocked_parallel');
+      return;
+    }
+
     setPermissionNote(null);
     setShortRecordingNote(false);
+    setBusyNote(null);
+
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setPhase('unsupported');
       console.info('[voiceIntro] recorder_unsupported');
+      return;
+    }
+
+    recordingInFlightRef.current = true;
+    setPhase('requesting_permission');
+
+    const perm = await checkMicrophonePermission();
+    if (perm === 'denied') {
+      setPermissionNote('גישה למיקרופון נדחתה. אפשר/י להפעיל הרשאה בהגדרות הדפדפן ולנסות שוב.');
+      setPhase('error');
+      recordingInFlightRef.current = false;
+      console.info('[voiceIntro] permission_denied_precheck');
       return;
     }
 
@@ -157,6 +248,7 @@ export function VoiceIntroductionCard() {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true,
         },
       });
       streamRef.current = stream;
@@ -192,17 +284,29 @@ export function VoiceIntroductionCard() {
 
         const url = URL.createObjectURL(blob);
         replacePreviewUrl(url);
+        const durationSec = Math.min(elapsed, VOICE_INTRO_MAX_SEC);
         voiceIntroDraftRef.current = {
           blob,
-          durationSec: Math.min(elapsed, VOICE_INTRO_MAX_SEC),
+          durationSec,
           mimeType: mime,
         };
         setPhase('recorded');
         setPlaybackTime(0);
+        void persistDraft(blob, durationSec, mime);
+      };
+
+      rec.onerror = (e) => {
+        console.error('[voiceIntro] recorder_error', e);
+        setPermissionNote('אירעה שגיאה במהלך ההקלטה. נסה/י שוב.');
+        setPhase('error');
+        cleanupStream();
       };
 
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -228,10 +332,23 @@ export function VoiceIntroductionCard() {
       requestAnimationFrame(() => drawWave());
     } catch (e) {
       console.error('[voiceIntro] getUserMedia_failed', e);
-      setPermissionNote('יש לאפשר גישה למיקרופון כדי להקליט');
+      if (isPermissionDeniedError(e)) {
+        setPermissionNote('גישה למיקרופון נדחתה. אפשר/י להפעיל הרשאה בהגדרות הדפדפן ולנסות שוב.');
+      } else {
+        setPermissionNote('לא הצלחנו להתחיל הקלטה. בדקו חיבור למיקרופון ונסו שוב.');
+      }
+      setPhase('error');
       cleanupStream();
     }
-  }, [cleanupStream, drawWave, replacePreviewUrl, voiceIntroDraftRef]);
+  }, [
+    cleanupStream,
+    drawWave,
+    replacePreviewUrl,
+    voiceIntroDraftRef,
+    checkMicrophonePermission,
+    persistDraft,
+    phase,
+  ]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state === 'recording') {
@@ -247,10 +364,13 @@ export function VoiceIntroductionCard() {
     setElapsedSec(0);
     setPlaybackTime(0);
     setPlaying(false);
+    setPermissionNote(null);
+    setBusyNote(null);
     if (audioElRef.current) {
       audioElRef.current.pause();
       audioElRef.current.src = '';
     }
+    void clearOnboardingVoice();
   }, [replacePreviewUrl, voiceIntroDraftRef]);
 
   const togglePlay = useCallback(() => {
@@ -282,6 +402,8 @@ export function VoiceIntroductionCard() {
     phase === 'recorded' && voiceIntroDraftRef.current
       ? voiceIntroDraftRef.current.durationSec
       : elapsedSec;
+
+  const isBusy = phase === 'requesting_permission' || phase === 'saving';
 
   if (phase === 'unsupported') {
     return (
@@ -331,6 +453,9 @@ export function VoiceIntroductionCard() {
         {permissionNote && (
           <p className="text-sm text-amber-600 dark:text-amber-400 text-right">{permissionNote}</p>
         )}
+        {busyNote && (
+          <p className="text-sm text-muted-foreground text-right">{busyNote}</p>
+        )}
         {shortRecordingNote && (
           <p className="text-sm text-destructive text-right">
             ההקלטה קצרה מדי — נדרשות לפחות {VOICE_INTRO_MIN_SEC} שניות
@@ -338,7 +463,7 @@ export function VoiceIntroductionCard() {
         )}
 
         <AnimatePresence mode="wait">
-          {phase === 'idle' && (
+          {(phase === 'idle' || phase === 'error') && (
             <motion.div
               key="idle"
               initial={{ opacity: 0 }}
@@ -361,13 +486,26 @@ export function VoiceIntroductionCard() {
                 type="button"
                 whileTap={{ scale: 0.97 }}
                 onClick={() => void startRecording()}
-                className="rounded-full px-8 py-3 text-base font-semibold text-primary-foreground shadow-lg"
+                disabled={isBusy}
+                className="rounded-full px-8 py-3 text-base font-semibold text-primary-foreground shadow-lg disabled:opacity-50 disabled:pointer-events-none"
                 style={{
                   background: 'linear-gradient(135deg, hsl(263 84% 55%), hsl(271 81% 56%))',
                 }}
               >
-                התחל הקלטה
+                {phase === 'error' ? 'נסה/י שוב' : 'התחל הקלטה'}
               </motion.button>
+            </motion.div>
+          )}
+
+          {phase === 'requesting_permission' && (
+            <motion.div
+              key="perm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-3 py-6 text-center"
+            >
+              <p className="text-sm text-muted-foreground">מבקשים הרשאה לשימוש במיקרופון...</p>
             </motion.div>
           )}
 
@@ -419,6 +557,18 @@ export function VoiceIntroductionCard() {
             </motion.div>
           )}
 
+          {phase === 'saving' && (
+            <motion.div
+              key="saving"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-3 py-6 text-center"
+            >
+              <p className="text-sm text-muted-foreground">שומרים ההקלטה...</p>
+            </motion.div>
+          )}
+
           {phase === 'recorded' && previewUrl && (
             <motion.div
               key="done"
@@ -454,7 +604,7 @@ export function VoiceIntroductionCard() {
                   <p className="font-mono text-sm tabular-nums text-foreground">
                     {formatClock(playbackTime)} / {formatClock(durationDisplay)}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">משך ההקלטה</p>
+                  <p className="text-[11px] text-muted-foreground">משך ההקלטה · נשמרה בהצלחה</p>
                 </div>
               </div>
               <div className="canvas-placeholder h-10 w-full rounded-lg bg-muted/30 flex items-end justify-center gap-0.5 px-2 pb-1 opacity-70">
@@ -470,21 +620,24 @@ export function VoiceIntroductionCard() {
                 <button
                   type="button"
                   onClick={deleteRecording}
-                  className="inline-flex items-center gap-2 rounded-full border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10"
+                  disabled={isBusy}
+                  className="inline-flex items-center gap-2 rounded-full border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" />
                   מחק
                 </button>
                 <button
                   type="button"
+                  disabled={isBusy}
                   onClick={() => {
                     replacePreviewUrl(null);
                     voiceIntroDraftRef.current = null;
                     setPhase('idle');
                     setPlaying(false);
+                    void clearOnboardingVoice();
                     void startRecording();
                   }}
-                  className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+                  className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
                 >
                   <RotateCcw className="h-4 w-4" />
                   הקלט מחדש

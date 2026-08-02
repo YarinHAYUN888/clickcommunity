@@ -10,16 +10,16 @@ import { extensionForMime, VOICE_INTRO_MIN_SEC, VOICE_INTRO_MAX_SEC } from '@/se
 export async function uploadVoiceIntroAfterProfile(
   userId: string,
   draft: VoiceIntroDraft,
-): Promise<void> {
+): Promise<boolean> {
   if (!draft || !draft.blob || draft.blob.size < 1) {
     console.info('[voiceIntroUpload] skip_no_draft', { userId });
-    return;
+    return true;
   }
 
   const duration = draft.durationSec;
   if (duration < VOICE_INTRO_MIN_SEC - 0.5 || duration > VOICE_INTRO_MAX_SEC + 0.5) {
     console.warn('[voiceIntroUpload] skip_invalid_duration', { userId, duration });
-    return;
+    return true;
   }
 
   const mime = draft.mimeType || draft.blob.type || 'audio/webm';
@@ -70,6 +70,7 @@ export async function uploadVoiceIntroAfterProfile(
     }
 
     console.info('[voiceIntroUpload] success', { userId, path, durationSec: Math.round(duration) });
+    return true;
   } catch (err) {
     console.error('[voiceIntroUpload] failure', err);
     const { error: failErr } = await supabase
@@ -85,5 +86,6 @@ export async function uploadVoiceIntroAfterProfile(
     }
 
     toast.message('לא הצלחנו לשמור את ההקלטה הקולית כרגע. אפשר להמשיך — תמיד אפשר לעדכן בהמשך מהפרופיל.');
+    return false;
   }
 }

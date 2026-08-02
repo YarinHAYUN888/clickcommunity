@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { userHasEventAccess } from "../_shared/eventAccess.ts";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
 const ALLOWED_VOTES = new Set(["clicked", "no_click"]);
@@ -26,6 +27,23 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const { data: voterProfile } = await supabase
+      .from("profiles")
+      .select("super_role, role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const allowed = await userHasEventAccess(supabase, user.id, voterProfile);
+    if (!allowed) {
+      return new Response(
+        JSON.stringify({
+          error: "insufficient_clicks",
+          message: "נדרשים 5 קליקים ממשתמשים אחרים",
+        }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const { event_id, votes } = await req.json();

@@ -39,6 +39,7 @@ import {
 import { compressDataUrlForUpload } from '@/services/profile';
 import { finalizeOnboardingProfile, type OnboardingDraft } from '@/services/profileSavePipeline';
 import { loadOnboardingPhotos } from '@/lib/onboardingPhotoStore';
+import { clearOnboardingVoice, loadOnboardingVoice } from '@/lib/onboardingVoiceStore';
 
 const steps = ['credentials', 'basics', 'photos', 'about', 'interests', 'introduction', 'account-verification'] as const;
 type Step = typeof steps[number];
@@ -953,6 +954,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
   const sendInFlightRef = useRef(false);
   const lastRegistrationCodeRef = useRef<'created' | 'already_exists' | undefined>(undefined);
   const [deliveryInfo, setDeliveryInfo] = useState('');
+  const [deliveryState, setDeliveryState] = useState<'idle' | 'sending' | 'sent' | 'pending' | 'failed'>('idle');
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((data.email ?? '').trim());
 
   useEffect(() => {
@@ -1091,6 +1093,22 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     }
     const photosExpected = onboardingPhotos.length > 0 || getExpectedPhotoCount() > 0;
     const draft = onboardingDataToDraft(data as Record<string, unknown>);
+
+    if (!voiceIntroDraftRef.current) {
+      try {
+        const voiceRecord = await loadOnboardingVoice(getOnboardingSessionId());
+        if (voiceRecord) {
+          voiceIntroDraftRef.current = {
+            blob: voiceRecord.blob,
+            durationSec: voiceRecord.durationSec,
+            mimeType: voiceRecord.mimeType,
+          };
+        }
+      } catch {
+        /* ignore durable restore */
+      }
+    }
+
     return {
       password,
       email,
@@ -1098,7 +1116,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       photosExpected,
       draft,
     };
-  }, [data, photosDraftRef, getPassword, getOnboardingSessionId, getExpectedPhotoCount]);
+  }, [data, photosDraftRef, getPassword, getOnboardingSessionId, getExpectedPhotoCount, voiceIntroDraftRef]);
 
   const applyOtpIssueSuccess = useCallback(
     (result: IssueOtpResult) => {
@@ -1106,13 +1124,23 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       challengeIdRef.current = result.challengeId;
       persistPendingOtpChallenge(result.challengeId);
       setSendError('');
-      setDeliveryInfo(
-        result.deliveryStatus === 'pending'
-          ? getHebrewOnboardingMessage('otp_delivery_pending')
-          : result.deliveryUncertain
-            ? getHebrewOnboardingMessage('otp_sent_uncertain')
-            : '',
-      );
+
+      const status = result.deliveryStatus;
+      if (status === 'sent') {
+        setDeliveryState('sent');
+        setDeliveryInfo('');
+      } else if (status === 'pending' || result.deliveryUncertain) {
+        setDeliveryState('pending');
+        setDeliveryInfo(
+          status === 'pending'
+            ? getHebrewOnboardingMessage('otp_delivery_pending')
+            : getHebrewOnboardingMessage('otp_sent_uncertain'),
+        );
+      } else {
+        setDeliveryState('sent');
+        setDeliveryInfo('');
+      }
+
       setCodeSent(true);
       setResendTimer(60);
       updateData({ verificationMethod: method });
@@ -1140,11 +1168,13 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
     sendInFlightRef.current = true;
     setSending(true);
+    setDeliveryState('sending');
 
     try {
       const result = await issueOnboardingOtp(data, method, registrationSessionIdRef.current);
 
       if (!result.ok || !result.challengeId) {
+        setDeliveryState('failed');
         setSendError(getHebrewOnboardingMessage(mapIssueOtpError(result.errorCode ?? result.error)));
         return;
       }
@@ -1152,6 +1182,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       applyOtpIssueSuccess(result);
     } catch (e) {
       console.error('Send code exception:', e);
+      setDeliveryState('failed');
       setSendError(getHebrewOnboardingMessage('otp_network_error'));
     } finally {
       sendInFlightRef.current = false;
@@ -1265,7 +1296,10 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       });
 
       lastRegistrationCodeRef.current = result.registrationCode;
-      voiceIntroDraftRef.current = null;
+      if (result.voiceUploadOk) {
+        voiceIntroDraftRef.current = null;
+        void clearOnboardingVoice();
+      }
       photosDraftRef.current = [];
       clearPendingOtp();
 
@@ -1401,7 +1435,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
 
   const handleResend = async () => {
     if (method !== 'email' && method !== 'phone') return;
-    if (sending || sendInFlightRef.current) return;
+    if (sending || sendInFlightRef.current || resendTimer > 0) return;
     if (method === 'phone' && !phoneLooksValid) {
       setVerifyError('נדרש מספר טלפון מלא. חזרו לשלב יצירת החשבון.');
       return;
@@ -1412,23 +1446,20 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     }
     setOtp(['', '', '', '', '', '']);
     setVerifyError('');
-    setResendTimer(60);
     sendInFlightRef.current = true;
     setSending(true);
+    setDeliveryState('sending');
     try {
       const result = await issueOnboardingOtp(data, method, registrationSessionIdRef.current);
       if (!result.ok || !result.challengeId) {
+        setDeliveryState('failed');
         setVerifyError(getHebrewOnboardingMessage(mapIssueOtpError(result.errorCode ?? result.error)));
       } else {
-        challengeIdRef.current = result.challengeId;
-        persistPendingOtpChallenge(result.challengeId);
-        setDeliveryInfo(
-          result.deliveryUncertain ? getHebrewOnboardingMessage('otp_sent_uncertain') : '',
-        );
-        inputRefs.current[0]?.focus();
+        applyOtpIssueSuccess(result);
       }
     } catch (e) {
       console.error('Resend exception:', e);
+      setDeliveryState('failed');
       setVerifyError(getHebrewOnboardingMessage('otp_network_error'));
     } finally {
       sendInFlightRef.current = false;
@@ -1512,12 +1543,15 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       <div>
         <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">הכנס/י את הקוד</h2>
         <p className="text-muted-foreground text-base mt-2">
-          {method === 'email'
+          {deliveryState === 'sent'
             ? `שלחנו קוד ל-${data.email}`
-            : phoneLooksValid
-              ? `שלחנו קוד ל-+972-${data.phone.replace(/[-\s]/g, '').replace(/^0/, '').replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3')}`
-              : 'חסר מספר טלפון מלא — חזרו לשלב יצירת החשבון עם חץ חזרה.'}
+            : deliveryState === 'pending'
+              ? `בקשת שליחת קוד ל-${data.email} התקבלה — ממתינים לאישור השליחה`
+              : `הזינו את הקוד שקיבלתם ל-${data.email}`}
         </p>
+        {sending && (
+          <p className="text-sm text-muted-foreground mt-2">שולחים קוד אימות...</p>
+        )}
         {deliveryInfo && (
           <p className="text-sm text-muted-foreground mt-2">{deliveryInfo}</p>
         )}
@@ -1562,7 +1596,13 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         {resendTimer > 0 ? (
           <p className="text-sm text-muted-foreground">שלח קוד חדש ({formatTimer(resendTimer)})</p>
         ) : (
-          <button onClick={handleResend} className="text-sm font-medium text-primary">שלח קוד חדש</button>
+          <button
+            onClick={handleResend}
+            disabled={sending || resendTimer > 0}
+            className="text-sm font-medium text-primary disabled:opacity-50 disabled:pointer-events-none"
+          >
+            {sending ? 'שולחים קוד...' : 'שלח קוד חדש'}
+          </button>
         )}
       </div>
     </div>
