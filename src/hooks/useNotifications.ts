@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 import {
   fetchUserNotifications,
   markNotificationRead,
@@ -34,6 +34,9 @@ export function useNotifications(authId: string | null | undefined) {
     toast(n.title, { description: n.body });
   }, []);
 
+  const showToastRef = useRef(showToastForNotification);
+  showToastRef.current = showToastForNotification;
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -41,31 +44,25 @@ export function useNotifications(authId: string | null | undefined) {
   useEffect(() => {
     if (!authId) return;
 
-    const channel = supabase
-      .channel(`user_notifications:${authId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'user_notifications',
-          filter: `user_id=eq.${authId}`,
-        },
-        (payload) => {
-          const row = payload.new as UserNotification;
+    const channel = subscribePostgresChannel(`user_notifications:${authId}`, [
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'user_notifications',
+        filter: `user_id=eq.${authId}`,
+        callback: (payload) => {
+          const row = (payload as { new: UserNotification }).new;
           setNotifications((prev) => {
             if (prev.some((p) => p.id === row.id || p.dedupe_key === row.dedupe_key)) return prev;
             return [row, ...prev];
           });
-          showToastForNotification(row);
+          showToastRef.current(row);
         },
-      )
-      .subscribe();
+      },
+    ]);
 
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [authId, showToastForNotification]);
+    return () => unsubscribeRealtimeChannel(channel);
+  }, [authId]);
 
   const markRead = useCallback(async (id: string) => {
     await markNotificationRead(id);

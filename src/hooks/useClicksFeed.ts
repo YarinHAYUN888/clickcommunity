@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 import { SupabaseProfile } from './useCurrentUser';
 import { allInterests } from '@/data/demo';
 import { buildClicksFeedCandidates } from '@/lib/matching/clicksFeedBuilder';
@@ -177,31 +178,30 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     setLoading(false);
   }, [currentUserId, mySignalsKey]);
 
+  const fetchProfilesRef = useRef(fetchProfiles);
+  fetchProfilesRef.current = fetchProfiles;
+
   useEffect(() => {
     fetchProfiles();
   }, [fetchProfiles]);
 
   useEffect(() => {
     if (!currentUserId) return;
-    const channel = supabase
-      .channel(`profile-swipes-incoming-${currentUserId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'profile_swipes',
-          filter: `to_user_id=eq.${currentUserId}`,
+
+    const channel = subscribePostgresChannel(`profile-swipes-incoming-${currentUserId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'profile_swipes',
+        filter: `to_user_id=eq.${currentUserId}`,
+        callback: () => {
+          void fetchProfilesRef.current({ silent: true });
         },
-        () => {
-          void fetchProfiles({ silent: true });
-        },
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [currentUserId, fetchProfiles]);
+      },
+    ]);
+
+    return () => unsubscribeRealtimeChannel(channel);
+  }, [currentUserId]);
 
   const removeFromFeed = useCallback((userId: string) => {
     setItems((prev) => prev.filter((i) => i.profile.user_id !== userId));

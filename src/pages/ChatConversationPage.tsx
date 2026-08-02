@@ -17,6 +17,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { notifyChatUnreadRefresh } from '@/contexts/ChatUnreadContext';
+import { unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 
 function formatMsgTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
@@ -176,7 +177,7 @@ export default function ChatConversationPage() {
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      if (channel) unsubscribeRealtimeChannel(channel);
     };
   }, [chatId, authId, navigate, location.state]);
 

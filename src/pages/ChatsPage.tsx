@@ -14,8 +14,8 @@ import {
   ChatRow,
   MessageRow,
 } from '@/services/chat';
-import { supabase } from '@/integrations/supabase/client';
 import { CHAT_UNREAD_REFRESH_EVENT } from '@/contexts/ChatUnreadContext';
+import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 
 function formatTime(dateStr: string) {
   const d = new Date(dateStr);
@@ -119,6 +119,9 @@ export default function ChatsPage() {
     }, 120);
   }, []);
 
+  const scheduleReloadRef = useRef(scheduleReload);
+  scheduleReloadRef.current = scheduleReload;
+
   useEffect(() => {
     return () => {
       if (reloadTimerRef.current) window.clearTimeout(reloadTimerRef.current);
@@ -155,40 +158,38 @@ export default function ChatsPage() {
 
   useEffect(() => {
     if (!authId) return;
-    const membershipChannel = supabase
-      .channel(`chat-membership-${authId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'chat_participants', filter: `user_id=eq.${authId}` },
-        () => scheduleReload()
-      )
-      .subscribe();
 
-    return () => {
-      supabase.removeChannel(membershipChannel);
-    };
-  }, [authId, scheduleReload]);
+    const channel = subscribePostgresChannel(`chat-membership-${authId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'chat_participants',
+        filter: `user_id=eq.${authId}`,
+        callback: () => scheduleReloadRef.current(),
+      },
+    ]);
+
+    return () => unsubscribeRealtimeChannel(channel);
+  }, [authId]);
 
   const dmChatIdsKey = useMemo(() => dms.map((d) => d.chat.id).sort().join(','), [dms]);
 
   useEffect(() => {
-    if (!authId || tab !== 'direct') return;
-    const ids = dms.map((d) => d.chat.id);
-    if (ids.length === 0) return;
+    if (!authId || tab !== 'direct' || !dmChatIdsKey) return;
 
-    const ch = supabase.channel(`chats-page-msgs-${authId}-${dmChatIdsKey.slice(0, 48)}`);
-    ids.forEach((chatId) => {
-      ch.on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-        () => scheduleReload()
-      );
-    });
-    ch.subscribe();
+    const ids = dmChatIdsKey.split(',');
+    const channelName = `chats-page-msgs-${authId}-${dmChatIdsKey.slice(0, 48)}`;
+    const handlers = ids.map((chatId) => ({
+      event: 'INSERT' as const,
+      schema: 'public',
+      table: 'messages',
+      filter: `chat_id=eq.${chatId}`,
+      callback: () => scheduleReloadRef.current(),
+    }));
 
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    const channel = subscribePostgresChannel(channelName, handlers);
+
+    return () => unsubscribeRealtimeChannel(channel);
   }, [authId, tab, dmChatIdsKey]);
 
   // Guest lock screen

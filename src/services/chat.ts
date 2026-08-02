@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChannel } from '@/lib/supabaseRealtime';
 
 /* ── Types ── */
 export interface ChatRow {
@@ -326,27 +327,26 @@ export async function getSenderProfile(senderId: string) {
 /* ── Realtime ── */
 
 export function subscribeToMessages(chatId: string, onMessage: (msg: MessageRow) => void) {
-  const channel = supabase
-    .channel(`chat-${chatId}`)
-    .on('postgres_changes', {
+  return subscribePostgresChannel(`chat-${chatId}`, [
+    {
       event: 'INSERT',
       schema: 'public',
       table: 'messages',
       filter: `chat_id=eq.${chatId}`,
-    }, (payload) => {
-      onMessage(payload.new as MessageRow);
-    })
-    .on('postgres_changes', {
+      callback: (payload) => {
+        onMessage((payload as { new: MessageRow }).new);
+      },
+    },
+    {
       event: 'UPDATE',
       schema: 'public',
       table: 'messages',
       filter: `chat_id=eq.${chatId}`,
-    }, (payload) => {
-      onMessage({ ...(payload.new as MessageRow), } as any);
-    })
-    .subscribe();
-
-  return channel;
+      callback: (payload) => {
+        onMessage({ ...((payload as { new: MessageRow }).new) } as MessageRow);
+      },
+    },
+  ]);
 }
 
 /* ── Edge Function Calls ── */

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage';
 
 interface Props {
   children: ReactNode;
@@ -13,7 +14,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, message: '' };
 
   static getDerivedStateFromError(err: Error): State {
-    return { hasError: true, message: err.message || 'שגיאה לא צפויה' };
+    return { hasError: true, message: userFacingErrorMessage(err) };
   }
 
   componentDidCatch(err: Error, info: ErrorInfo) {

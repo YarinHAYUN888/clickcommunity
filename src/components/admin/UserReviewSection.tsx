@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ClipboardList, X, User } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import type { Database } from '@/integrations/supabase/types';
 import { formatQuestionnaireForAdmin } from '@/data/introductionQuestionnaire';
 import { VoiceIntroReviewPlayer } from '@/components/admin/VoiceIntroReviewPlayer';
+import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 
@@ -54,27 +55,26 @@ export function UserReviewSection() {
     void refreshCount();
   }, [refreshCount]);
 
+  const loadRowsRef = useRef(loadRows);
+  loadRowsRef.current = loadRows;
+
   useEffect(() => {
     void refreshCount();
   }, [refreshCount]);
 
   useEffect(() => {
     if (!panelOpen) return;
-    void loadRows();
-    const channel = supabase
-      .channel('admin-profiles-suitability')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
-        () => {
-          void loadRows();
-        },
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [panelOpen, loadRows]);
+    void loadRowsRef.current();
+    const channel = subscribePostgresChannel('admin-profiles-suitability', [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'profiles',
+        callback: () => void loadRowsRef.current(),
+      },
+    ]);
+    return () => unsubscribeRealtimeChannel(channel);
+  }, [panelOpen]);
 
   useEffect(() => {
     if (!panelOpen || rows.length === 0) {

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { ensureCommunityMemberDefaults } from '@/services/profileSavePipeline';
+import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 import { DEFAULT_NEW_USER_ROLE_FALLBACK } from '@/lib/profileCompletion';
 import type { CurrentUser, SupabaseProfile } from '@/hooks/useCurrentUser';
 import { profileListeners } from '@/hooks/useCurrentUser';
@@ -158,31 +158,24 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     };
     profileListeners.add(onExternalUpdate);
 
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let channel: ReturnType<typeof subscribePostgresChannel> | null = null;
     try {
-      channel = supabase
-        .channel(`profiles-self-${authId}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'profiles', filter: `user_id=eq.${authId}` },
-          () => {
-            pull();
-          },
-        )
-        .subscribe();
+      channel = subscribePostgresChannel(`profiles-self-${authId}`, [
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${authId}`,
+          callback: () => pull(),
+        },
+      ]);
     } catch (e) {
       console.warn('[useCurrentUser] profile realtime subscribe failed:', e);
     }
 
     return () => {
       profileListeners.delete(onExternalUpdate);
-      if (channel) {
-        try {
-          void supabase.removeChannel(channel);
-        } catch {
-          /* ignore */
-        }
-      }
+      unsubscribeRealtimeChannel(channel);
     };
   }, [authId]);
 
