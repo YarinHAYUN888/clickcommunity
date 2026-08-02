@@ -6,12 +6,31 @@ export type ProfileClickStats = {
   event_access_unlocked_at: string | null;
 };
 
+export const EMPTY_CLICK_STATS: ProfileClickStats = {
+  incoming_click_count: 0,
+  event_access_unlocked_at: null,
+};
+
 export function hasEventAccessFromStats(stats: ProfileClickStats | null | undefined): boolean {
   if (!stats) return false;
   if (stats.event_access_unlocked_at) return true;
   return stats.incoming_click_count >= EVENT_ACCESS_MIN_INCOMING_CLICKS;
 }
 
+function logClickStatsError(error: { code?: string; message?: string; details?: string; hint?: string }) {
+  if (import.meta.env.DEV) {
+    console.error('[clickStats] fetch failed', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+  } else {
+    console.warn('[clickStats] fetch failed', error.code ?? 'unknown', error.message ?? '');
+  }
+}
+
+/** Returns empty stats when no row exists; throws only on real server/RLS/schema errors. */
 export async function fetchMyClickStats(userId: string): Promise<ProfileClickStats> {
   const { data, error } = await supabase
     .from('profile_click_stats')
@@ -20,12 +39,12 @@ export async function fetchMyClickStats(userId: string): Promise<ProfileClickSta
     .maybeSingle();
 
   if (error) {
-    console.warn('[clickStats] fetch failed', error.message);
+    logClickStatsError(error);
     throw new Error('לא הצלחנו לטעון מספר הקליקים. נסה/י שוב.');
   }
 
   if (!data) {
-    return { incoming_click_count: 0, event_access_unlocked_at: null };
+    return { ...EMPTY_CLICK_STATS };
   }
 
   return {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribePostgresChannel, unsubscribeRealtimeChannel } from '@/lib/supabaseRealtime';
 import {
+  EMPTY_CLICK_STATS,
   fetchMyClickStats,
   hasEventAccessFromStats,
   type ProfileClickStats,
@@ -14,25 +15,26 @@ export type IncomingClickCountState = {
   error: string | null;
 };
 
-const DEFAULT_STATS: ProfileClickStats = {
-  incoming_click_count: 0,
-  event_access_unlocked_at: null,
-};
-
 export function useIncomingClickCount(authId: string | null | undefined, isAdmin = false) {
-  const [stats, setStats] = useState<ProfileClickStats>(DEFAULT_STATS);
+  const [stats, setStats] = useState<ProfileClickStats>(EMPTY_CLICK_STATS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const refreshInFlightRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!authId) {
-      setStats(DEFAULT_STATS);
+      setStats(EMPTY_CLICK_STATS);
       setLoading(false);
       setError(null);
       return;
     }
+
+    if (refreshInFlightRef.current) return;
+
+    refreshInFlightRef.current = true;
     setLoading(true);
     setError(null);
+
     try {
       const row = await fetchMyClickStats(authId);
       setStats(row);
@@ -40,6 +42,7 @@ export function useIncomingClickCount(authId: string | null | undefined, isAdmin
       setError(e instanceof Error ? e.message : 'שגיאה בטעינת הקליקים');
     } finally {
       setLoading(false);
+      refreshInFlightRef.current = false;
     }
   }, [authId]);
 
@@ -53,25 +56,33 @@ export function useIncomingClickCount(authId: string | null | undefined, isAdmin
   useEffect(() => {
     if (!authId) return;
 
-    const channel = subscribePostgresChannel(`profile_click_stats:${authId}`, [
-      {
-        event: '*',
-        schema: 'public',
-        table: 'profile_click_stats',
-        filter: `user_id=eq.${authId}`,
-        callback: (payload) => {
-          const row = (payload as { new: ProfileClickStats | undefined }).new;
-          if (row && typeof row.incoming_click_count === 'number') {
-            setStats({
-              incoming_click_count: row.incoming_click_count,
-              event_access_unlocked_at: row.event_access_unlocked_at ?? null,
-            });
-          } else {
-            void refreshRef.current();
-          }
+    let channel: ReturnType<typeof subscribePostgresChannel> | null = null;
+    try {
+      channel = subscribePostgresChannel(`profile_click_stats:${authId}`, [
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profile_click_stats',
+          filter: `user_id=eq.${authId}`,
+          callback: (payload) => {
+            const row = (payload as { new: ProfileClickStats | undefined }).new;
+            if (row && typeof row.incoming_click_count === 'number') {
+              setStats({
+                incoming_click_count: row.incoming_click_count,
+                event_access_unlocked_at: row.event_access_unlocked_at ?? null,
+              });
+              setError(null);
+            } else {
+              void refreshRef.current();
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[useIncomingClickCount] realtime subscribe failed', e);
+      }
+    }
 
     return () => unsubscribeRealtimeChannel(channel);
   }, [authId]);

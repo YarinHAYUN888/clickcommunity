@@ -29,10 +29,11 @@ export default function EventsAccessGate() {
           <p className="text-destructive font-medium mb-2">{error}</p>
           <button
             type="button"
+            disabled={loading}
             onClick={() => void refresh()}
-            className="gradient-primary text-primary-foreground px-6 py-3 rounded-full text-sm font-medium"
+            className="gradient-primary text-primary-foreground px-6 py-3 rounded-full text-sm font-medium disabled:opacity-50"
           >
-            נסה/י שוב
+            {loading ? 'טוען...' : 'נסה/י שוב'}
           </button>
         </div>
       </div>
