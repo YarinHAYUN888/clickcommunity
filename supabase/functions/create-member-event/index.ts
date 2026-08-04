@@ -1,5 +1,6 @@
 import { jsonResponse, optionsOk, requireAuthUser } from "../_shared/edgeAuth.ts";
 import { MEMBER_EVENT_MIN_POINTS } from "../_shared/points.ts";
+import { isApprovedGroupA, isApprovedGroupB } from "../_shared/eventAccess.ts";
 
 /** Milliseconds offset of Asia/Jerusalem from UTC for a given instant (handles DST). */
 function jerusalemOffsetMs(date: Date): number {
@@ -82,15 +83,16 @@ Deno.serve(async (req) => {
   if (profile.role !== "member") {
     return jsonResponse({ ok: false, error_code: "not_member", message: "יצירת אירוע זמינה לחברי קהילה בלבד" }, 403);
   }
-  if (profile.moderation_status !== "approved") {
-    return jsonResponse({ ok: false, error_code: "not_approved", message: "הפרופיל טרם אושר" }, 403);
+  const hostIsA = isApprovedGroupA(profile);
+  const hostIsB = isApprovedGroupB(profile);
+  if (!hostIsA && !hostIsB) {
+    return jsonResponse({
+      ok: false,
+      error_code: "not_approved_group",
+      message: "יצירת אירוע זמינה רק למשתמשים מאושרים בקבוצה",
+    }, 403);
   }
-  if (profile.suitability_status !== "active") {
-    return jsonResponse({ ok: false, error_code: "not_active", message: "החשבון אינו פעיל" }, 403);
-  }
-  if (profile.is_shadow === true) {
-    return jsonResponse({ ok: false, error_code: "shadow_user", message: "לא ניתן ליצור אירוע מחשבון זה" }, 403);
-  }
+  const hostAudienceGroup = hostIsB ? "B" : "A";
 
   const points = typeof profile.points === "number" ? profile.points : 0;
   if (points < MEMBER_EVENT_MIN_POINTS) {
@@ -143,6 +145,7 @@ Deno.serve(async (req) => {
     reserved_new_spots,
     gender_balance_target: 0.5,
     requires_subscription: false,
+    audience_group: hostAudienceGroup,
     status: "pending_review" as const,
     host_id: userId,
     created_by: userId,

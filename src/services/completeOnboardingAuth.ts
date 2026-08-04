@@ -16,6 +16,7 @@ import {
 import {
   ensureCommunityMemberDefaults,
   finalizeOnboardingProfile,
+  markOnboardingProfileCompletedIfReady,
   type OnboardingDraft,
 } from '@/services/profileSavePipeline';
 import { runUserAnalysis } from '@/services/userSuitability';
@@ -224,17 +225,37 @@ export async function runPostOtpRegistration(
     throw new Error('profile_save_failed');
   }
 
-  let voiceUploadOk = true;
-  if (voiceBlob) {
-    try {
-      voiceUploadOk = await uploadVoiceIntroAfterProfile(userId, voiceBlob);
-      if (!voiceUploadOk) {
-        console.warn('[runPostOtpRegistration] voice upload failed — keeping local draft');
-      }
-    } catch (voiceErr) {
-      console.error('[runPostOtpRegistration] voice upload failed:', voiceErr);
-      voiceUploadOk = false;
+  let voiceUploadOk = false;
+  try {
+    voiceUploadOk = await uploadVoiceIntroAfterProfile(userId, voiceBlob);
+    if (!voiceUploadOk) {
+      console.warn('[runPostOtpRegistration] voice upload failed — keeping local draft');
     }
+  } catch (voiceErr) {
+    console.error('[runPostOtpRegistration] voice upload failed:', voiceErr);
+    voiceUploadOk = false;
+  }
+
+  // Do not mark registration complete without a successful voice intro upload.
+  if (!voiceUploadOk) {
+    return {
+      userId,
+      registrationCode,
+      profileSyncFailed,
+      photoUrls,
+      failedSlots,
+      partialFailure: true,
+      imageUploadStatus,
+      sessionEstablished: true,
+      route: '/complete-profile',
+      voiceUploadOk: false,
+      failureStage: 'voice_upload',
+    };
+  }
+
+  const completed = await markOnboardingProfileCompletedIfReady(userId);
+  if (!completed) {
+    console.warn('[runPostOtpRegistration] profile not fully complete after assets');
   }
 
   try {
@@ -280,6 +301,54 @@ export async function runPostOtpRegistration(
   };
 }
 
+async function finalizeRecoveredUser(
+  userId: string,
+  draft: OnboardingDraft,
+  photoSources: string[],
+  photosExpected: boolean | undefined,
+  voiceBlob: VoiceIntroDraft,
+): Promise<{
+  profileSyncFailed: boolean;
+  photoUrls: string[];
+  partialFailure: boolean;
+  imageUploadStatus: 'pending' | 'success' | 'failed';
+  voiceUploadOk: boolean;
+}> {
+  await ensureCommunityMemberDefaults(userId);
+  let profileSyncFailed = false;
+  let photoUrls: string[] = [];
+  let partialFailure = false;
+  let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
+  try {
+    const r = await finalizeOnboardingProfile(userId, draft, photoSources, {
+      photosExpected: photosExpected !== false,
+    });
+    profileSyncFailed = r.profileSyncFailed;
+    photoUrls = r.photoUrls;
+    partialFailure = r.partialFailure;
+    imageUploadStatus = r.imageUploadStatus;
+  } catch {
+    profileSyncFailed = true;
+    imageUploadStatus = photoSources.length > 0 ? 'failed' : 'failed';
+  }
+
+  let voiceUploadOk = false;
+  if (!profileSyncFailed) {
+    try {
+      voiceUploadOk = await uploadVoiceIntroAfterProfile(userId, voiceBlob);
+    } catch {
+      voiceUploadOk = false;
+    }
+    if (voiceUploadOk) {
+      await markOnboardingProfileCompletedIfReady(userId);
+    } else {
+      partialFailure = true;
+    }
+  }
+
+  return { profileSyncFailed, photoUrls, partialFailure, imageUploadStatus, voiceUploadOk };
+}
+
 /** If auth succeeded but UI errored — finalize idempotently and return redirect route. */
 export async function tryRecoverSessionAfterFailure(
   draft: OnboardingDraft,
@@ -288,6 +357,7 @@ export async function tryRecoverSessionAfterFailure(
   password: string,
   _registrationCode?: 'created' | 'already_exists',
   photosExpected?: boolean,
+  voiceBlob?: VoiceIntroDraft,
 ): Promise<
   | {
       recovered: true;
@@ -297,6 +367,7 @@ export async function tryRecoverSessionAfterFailure(
       photoUrls: string[];
       partialFailure: boolean;
       imageUploadStatus: 'pending' | 'success' | 'failed';
+      voiceUploadOk?: boolean;
     }
   | { recovered: false }
 > {
@@ -305,32 +376,19 @@ export async function tryRecoverSessionAfterFailure(
   } = await supabase.auth.getSession();
 
   if (session?.user?.id) {
-    await ensureCommunityMemberDefaults(session.user.id);
-    let profileSyncFailed = false;
-    let photoUrls: string[] = [];
-    let partialFailure = false;
-    let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
-    try {
-      const r = await finalizeOnboardingProfile(session.user.id, draft, photoSources, {
-        photosExpected,
-      });
-      profileSyncFailed = r.profileSyncFailed;
-      photoUrls = r.photoUrls;
-      partialFailure = r.partialFailure;
-      imageUploadStatus = r.imageUploadStatus;
-    } catch {
-      profileSyncFailed = true;
-      imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
-    }
+    const r = await finalizeRecoveredUser(
+      session.user.id,
+      draft,
+      photoSources,
+      photosExpected,
+      voiceBlob ?? null,
+    );
     const { route } = await resolvePostAuthRedirect(session.user.id);
     return {
       recovered: true,
       userId: session.user.id,
       route,
-      profileSyncFailed,
-      photoUrls,
-      partialFailure,
-      imageUploadStatus,
+      ...r,
     };
   }
 
@@ -340,32 +398,19 @@ export async function tryRecoverSessionAfterFailure(
       password,
     });
     if (!error && signInData.user?.id) {
-      await ensureCommunityMemberDefaults(signInData.user.id);
-      let profileSyncFailed = false;
-      let photoUrls: string[] = [];
-      let partialFailure = false;
-      let imageUploadStatus: 'pending' | 'success' | 'failed' = 'pending';
-      try {
-        const r = await finalizeOnboardingProfile(signInData.user.id, draft, photoSources, {
-          photosExpected,
-        });
-        profileSyncFailed = r.profileSyncFailed;
-        photoUrls = r.photoUrls;
-        partialFailure = r.partialFailure;
-        imageUploadStatus = r.imageUploadStatus;
-      } catch {
-        profileSyncFailed = true;
-        imageUploadStatus = photoSources.length > 0 ? 'failed' : 'pending';
-      }
+      const r = await finalizeRecoveredUser(
+        signInData.user.id,
+        draft,
+        photoSources,
+        photosExpected,
+        voiceBlob ?? null,
+      );
       const { route } = await resolvePostAuthRedirect(signInData.user.id);
       return {
         recovered: true,
         userId: signInData.user.id,
         route,
-        profileSyncFailed,
-        photoUrls,
-        partialFailure,
-        imageUploadStatus,
+        ...r,
       };
     }
   }

@@ -331,7 +331,7 @@ export function UserReviewSection() {
                     onClick={() => void act(selectedRow.user_id, 'active')}
                     className="w-full py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50"
                   >
-                    אישור לקהילה
+                    העברה לקבוצה A
                   </button>
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -340,7 +340,7 @@ export function UserReviewSection() {
                       onClick={() => setShadowConfirmUserId(selectedRow.user_id)}
                       className="py-2.5 rounded-xl text-xs font-semibold border border-border hover:bg-muted/60 disabled:opacity-50"
                     >
-                      סביבה מבודדת
+                      אישור לקבוצה B
                     </button>
                     <button
                       type="button"
@@ -348,7 +348,7 @@ export function UserReviewSection() {
                       onClick={() => void act(selectedRow.user_id, 'blocked')}
                       className="py-2.5 rounded-xl text-xs font-semibold text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50"
                     >
-                      דחייה
+                      דחיית משתמש
                     </button>
                   </div>
                 </div>
@@ -379,11 +379,11 @@ export function UserReviewSection() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.96, opacity: 0 }}
             >
-              <h3 className="text-lg font-bold text-foreground">העברה לסביבה מבודדת</h3>
+              <h3 className="text-lg font-bold text-foreground">אישור לקבוצה B</h3>
               <div className="text-sm text-muted-foreground space-y-2">
                 <p>
                   <span className="font-semibold text-foreground">{shadowConfirmRow.first_name || 'משתמש/ת'}</span>
-                  {' '}יועבר/ת לקהילה נפרדת.
+                  {' '}יאושר/ת לקבוצה B ויקבל/ת גישה לאירועי B ו־ALL.
                 </p>
                 {Array.isArray(shadowConfirmRow.interests) && shadowConfirmRow.interests.length > 0 && (
                   <p>תחביבים: {shadowConfirmRow.interests.slice(0, 5).join(', ')}</p>
@@ -396,7 +396,7 @@ export function UserReviewSection() {
                       : 'מספר קליקים לא זמין'}
                 </p>
                 <p className="text-foreground/90">
-                  המשתמש/ת לא יראה/תראה את המילה &quot;מבודד&quot; — רק חוויית קהילה רגילה.
+                  המשתמש/ת לא יראה/תראה תווית קבוצה — רק חוויית קהילה רגילה.
                 </p>
               </div>
               <div className="flex gap-2 pt-1">

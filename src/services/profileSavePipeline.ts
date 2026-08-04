@@ -3,6 +3,7 @@ import type { Database } from '@/integrations/supabase/types';
 import { isValidLifeNiche } from '@/data/lifeNiche';
 import {
   hasRequiredOnboardingFields,
+  isOnboardingFullyComplete,
   NEW_SIGNUP_PROFILE_DEFAULTS,
 } from '@/lib/profileCompletion';
 import {
@@ -251,12 +252,13 @@ export type FinalizeOnboardingResult = {
 };
 
 /**
- * Safe onboarding finale: text first, photos per-slot, never blanket-fail profile on non-photo errors.
+ * Safe onboarding finale: text first, photos per-slot.
+ * New registrations require at least one photo uploaded to Storage.
+ * Does NOT mark profile_completed — that happens only after voice intro is also saved
+ * via {@link markOnboardingProfileCompletedIfReady}.
  *
  * `opts.photosExpected` lets the caller signal that the user selected photos even when
- * `photoSources` arrived empty (e.g. durable storage could not restore them). In that case we
- * must NOT mark `profile_completed = true`, so the user is sent to complete their photo instead
- * of silently finishing without one.
+ * `photoSources` arrived empty (e.g. durable storage could not restore them).
  */
 export async function finalizeOnboardingProfile(
   userId: string,
@@ -275,7 +277,8 @@ export async function finalizeOnboardingProfile(
   await ensureCommunityMemberDefaults(userId);
 
   const validPhotoSources = photoSources.filter((s) => typeof s === 'string' && s.length > 0);
-  const photosExpected = opts?.photosExpected === true || validPhotoSources.length > 0;
+  // New registrations: profile photo is mandatory.
+  const photosExpected = opts?.photosExpected !== false;
 
   if (validPhotoSources.length > 0) {
     try {
@@ -302,7 +305,7 @@ export async function finalizeOnboardingProfile(
   }
 
   const computedImageStatus: 'pending' | 'success' | 'failed' =
-    validPhotoSources.length === 0 ? 'pending' : imageUploadStatus;
+    validPhotoSources.length === 0 ? (photosExpected ? 'failed' : 'pending') : imageUploadStatus;
 
   try {
     console.log('profile save', {
@@ -329,51 +332,29 @@ export async function finalizeOnboardingProfile(
   }
 
   const finalImageStatus: 'pending' | 'success' | 'failed' =
-    validPhotoSources.length === 0 ? 'pending' : imageUploadStatus;
+    validPhotoSources.length === 0
+      ? photosExpected
+        ? 'failed'
+        : 'pending'
+      : imageUploadStatus;
 
-  // Completion guard: when photos were expected, only treat them as saved if every
-  // selected photo uploaded successfully. If photos were expected but none arrived
-  // (durable restore failed), photos are NOT fully saved → do not complete the profile.
-  const photosFullySaved = photosExpected
-    ? validPhotoSources.length > 0 &&
-      photoUrls.length === validPhotoSources.length &&
-      finalImageStatus === 'success' &&
-      !partialFailure
-    : true;
+  const photosFullySaved =
+    validPhotoSources.length > 0 &&
+    photoUrls.length === validPhotoSources.length &&
+    finalImageStatus === 'success' &&
+    !partialFailure;
 
-  const shouldMarkProfileCompleted =
-    !profileSyncFailed &&
-    photosFullySaved &&
-    hasRequiredOnboardingFields({
-      first_name: data.firstName,
-      date_of_birth: data.dateOfBirth
-        ? `${data.dateOfBirth.year}-${String(data.dateOfBirth.month).padStart(2, '0')}-${String(data.dateOfBirth.day).padStart(2, '0')}`
-        : null,
-      gender: data.gender,
-      life_niche: data.life_niche,
-      interests: data.interests,
-      questionnaire_responses: data.questionnaireResponses,
-      moderation_status: 'approved',
-      profile_completed: false,
-    });
-
-  if (shouldMarkProfileCompleted) {
-    const { error: completeErr } = await supabase
-      .from('profiles')
-      .update({ profile_completed: true, updated_at: new Date().toISOString() })
-      .eq('user_id', userId);
-    if (completeErr) {
-      console.error('[finalizeOnboardingProfile] profile_completed update failed', completeErr);
-      profileSyncFailed = true;
-    } else {
-      console.log('ONBOARDING PROFILE FINAL SAVE SUCCESS', { userId, profile_completed: true });
-    }
+  // Photos mandatory for new signup — treat missing/failed upload as sync failure.
+  if (photosExpected && !photosFullySaved) {
+    profileSyncFailed = true;
+    if (finalImageStatus === 'pending') imageUploadStatus = 'failed';
   }
 
   if (partialFailure && !profileSyncFailed) {
     profileSyncFailed = true;
   }
 
+  // Keep profile_completed=false until voice intro is also uploaded (idempotent finalize).
   writeSaveProgress(userId, {
     textSaved: !profileSyncFailed,
     photoUrls,
@@ -384,9 +365,52 @@ export async function finalizeOnboardingProfile(
     profileSyncFailed,
     photoUrls,
     failedSlots,
-    partialFailure,
+    partialFailure: partialFailure || (photosExpected && !photosFullySaved),
     imageUploadStatus: finalImageStatus,
   };
+}
+
+/**
+ * Idempotent: marks profile_completed only when DB has required fields + photo + voice intro.
+ * Safe to call repeatedly after partial failures.
+ */
+export async function markOnboardingProfileCompletedIfReady(userId: string): Promise<boolean> {
+  const { data: row, error } = await supabase
+    .from('profiles')
+    .select(
+      'first_name, date_of_birth, gender, life_niche, interests, questionnaire_responses, moderation_status, profile_completed, photos, avatar_url, voice_intro_url, voice_intro_status',
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error || !row) {
+    console.error('[markOnboardingProfileCompletedIfReady] fetch failed', error);
+    return false;
+  }
+
+  if (row.profile_completed === true) return true;
+
+  if (!isOnboardingFullyComplete(row)) {
+    console.info('[markOnboardingProfileCompletedIfReady] not ready', {
+      userId,
+      hasPhoto: Array.isArray(row.photos) && row.photos.length > 0,
+      voiceStatus: row.voice_intro_status,
+    });
+    return false;
+  }
+
+  const { error: completeErr } = await supabase
+    .from('profiles')
+    .update({ profile_completed: true, updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  if (completeErr) {
+    console.error('[markOnboardingProfileCompletedIfReady] update failed', completeErr);
+    return false;
+  }
+
+  console.log('ONBOARDING PROFILE FINAL SAVE SUCCESS', { userId, profile_completed: true });
+  return true;
 }
 
 export { uploadPhotoSlot };

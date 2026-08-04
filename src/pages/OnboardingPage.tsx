@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { resolvePostAuthRedirect } from '@/lib/routing/postAuthRedirect';
 import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles, Lock } from 'lucide-react';
+import { ArrowRight, Plus, X, Briefcase, Check, Eye, EyeOff, MapPin, Instagram, Sparkles, Lock, Loader2 } from 'lucide-react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { LIFE_NICHE_OPTIONS, isValidLifeNiche } from '@/data/lifeNiche';
 import { IntroductionQuestionnaireStep } from '@/components/onboarding/IntroductionQuestionnaireStep';
@@ -37,7 +37,12 @@ import {
   tryRecoverSessionAfterFailure,
 } from '@/services/completeOnboardingAuth';
 import { compressDataUrlForUpload } from '@/services/profile';
-import { finalizeOnboardingProfile, type OnboardingDraft } from '@/services/profileSavePipeline';
+import {
+  finalizeOnboardingProfile,
+  markOnboardingProfileCompletedIfReady,
+  type OnboardingDraft,
+} from '@/services/profileSavePipeline';
+import { uploadVoiceIntroAfterProfile } from '@/services/voiceIntroUpload';
 import { loadOnboardingPhotos } from '@/lib/onboardingPhotoStore';
 import { clearOnboardingVoice, loadOnboardingVoice } from '@/lib/onboardingVoiceStore';
 
@@ -499,6 +504,10 @@ function isAllowedOnboardingImage(file: File): boolean {
   return false;
 }
 
+const ONBOARDING_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+type PhotoSlotStatus = 'idle' | 'selecting' | 'ready' | 'failed';
+
 function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; onNext: () => void }) {
   const { photosDraftRef } = useOnboarding();
   const [photos, setPhotos] = useState<(string | null)[]>(() => {
@@ -510,16 +519,32 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
     saved.forEach((p: string, i: number) => { if (i < ONBOARDING_PHOTO_SLOTS) arr[i] = p; });
     return arr;
   });
+  const [slotStatus, setSlotStatus] = useState<PhotoSlotStatus[]>(() =>
+    Array(ONBOARDING_PHOTO_SLOTS)
+      .fill('idle')
+      .map((_, i) => (photos[i] ? 'ready' : 'idle')) as PhotoSlotStatus[],
+  );
   const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const selectingRef = useRef(false);
   const filledCount = photos.filter(Boolean).length;
+  const busy = slotStatus.some((s) => s === 'selecting');
 
   const handleSelect = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const input = e.target;
     if (!file) return;
+    if (selectingRef.current) {
+      input.value = '';
+      return;
+    }
 
     if (file.size === 0) {
       toast.error('הקובץ ריק או פגום. נסה/י קובץ אחר.');
+      input.value = '';
+      return;
+    }
+    if (file.size > ONBOARDING_MAX_IMAGE_BYTES) {
+      toast.error('הקובץ גדול מדי. הגודל המרבי הוא 5MB.');
       input.value = '';
       return;
     }
@@ -530,18 +555,46 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
     }
 
     console.log('ONBOARDING IMAGE SELECTED', { index, type: file.type || 'unknown', size: file.size });
+    selectingRef.current = true;
+    setSlotStatus((prev) => {
+      const next = [...prev];
+      next[index] = 'selecting';
+      return next;
+    });
 
     const reader = new FileReader();
     reader.onload = async () => {
-      const raw = reader.result as string;
-      const compressed = await compressDataUrlForUpload(raw);
-      setPhotos((prev) => {
-        const next = [...prev];
-        next[index] = compressed;
-        return next;
-      });
+      try {
+        const raw = reader.result as string;
+        const compressed = await compressDataUrlForUpload(raw);
+        setPhotos((prev) => {
+          const next = [...prev];
+          next[index] = compressed;
+          return next;
+        });
+        setSlotStatus((prev) => {
+          const next = [...prev];
+          next[index] = 'ready';
+          return next;
+        });
+      } catch {
+        setSlotStatus((prev) => {
+          const next = [...prev];
+          next[index] = 'failed';
+          return next;
+        });
+        toast.error('טעינת התמונה נכשלה. נסה/י שוב');
+      } finally {
+        selectingRef.current = false;
+      }
     };
     reader.onerror = () => {
+      selectingRef.current = false;
+      setSlotStatus((prev) => {
+        const next = [...prev];
+        next[index] = 'failed';
+        return next;
+      });
       toast.error('טעינת התמונה נכשלה. נסה/י שוב');
     };
     reader.readAsDataURL(file);
@@ -549,10 +602,23 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
   };
 
   const removePhoto = (index: number) => {
-    setPhotos(prev => { const next = [...prev]; next[index] = null; return next; });
+    setPhotos((prev) => {
+      const next = [...prev];
+      next[index] = null;
+      return next;
+    });
+    setSlotStatus((prev) => {
+      const next = [...prev];
+      next[index] = 'idle';
+      return next;
+    });
   };
 
   const handleNext = () => {
+    if (busy || filledCount < 1) {
+      toast.error('יש לבחור לפחות תמונת פרופיל אחת לפני המשך');
+      return;
+    }
     const list = photos.filter(Boolean) as string[];
     photosDraftRef.current = list;
     updateData({ photos: list });
@@ -563,44 +629,110 @@ function PhotosStep({ data, updateData, onNext }: { data: any; updateData: any; 
     <div className="space-y-6">
       <div>
         <h2 className="text-[28px] md:text-[36px] font-bold text-foreground">הוסף/י תמונות</h2>
-        <p className="text-[15px] text-muted-foreground mt-2">בין 1-5 תמונות. התמונה הראשונה היא התמונה הראשית</p>
+        <p className="text-[15px] text-muted-foreground mt-2">
+          תמונת פרופיל חובה (עד 5). התמונה הראשונה היא התמונה הראשית ותישמר בשרת לאחר האימות
+        </p>
       </div>
       <div className="grid grid-cols-2 gap-3" style={{ direction: 'rtl' }}>
-        <PhotoSlot index={0} photo={photos[0]} isPrimary fileRef={el => (fileRefs.current[0] = el)} onSelect={e => handleSelect(0, e)} onRemove={() => removePhoto(0)} className="row-span-2" />
-        {[1, 2, 3, 4].map(i => (
-          <PhotoSlot key={i} index={i} photo={photos[i]} fileRef={el => (fileRefs.current[i] = el)} onSelect={e => handleSelect(i, e)} onRemove={() => removePhoto(i)} />
+        <PhotoSlot
+          index={0}
+          photo={photos[0]}
+          status={slotStatus[0]}
+          isPrimary
+          fileRef={(el) => (fileRefs.current[0] = el)}
+          onSelect={(e) => handleSelect(0, e)}
+          onRemove={() => removePhoto(0)}
+          className="row-span-2"
+        />
+        {[1, 2, 3, 4].map((i) => (
+          <PhotoSlot
+            key={i}
+            index={i}
+            photo={photos[i]}
+            status={slotStatus[i]}
+            fileRef={(el) => (fileRefs.current[i] = el)}
+            onSelect={(e) => handleSelect(i, e)}
+            onRemove={() => removePhoto(i)}
+          />
         ))}
       </div>
-      <StickyButton disabled={filledCount < 1} onClick={handleNext} label="המשך" />
+      <StickyButton disabled={filledCount < 1 || busy} onClick={handleNext} label="המשך" />
     </div>
   );
 }
 
-function PhotoSlot({ index, photo, isPrimary, fileRef, onSelect, onRemove, className = '' }: {
-  index: number; photo: string | null; isPrimary?: boolean;
+function PhotoSlot({
+  index,
+  photo,
+  status = 'idle',
+  isPrimary,
+  fileRef,
+  onSelect,
+  onRemove,
+  className = '',
+}: {
+  index: number;
+  photo: string | null;
+  status?: PhotoSlotStatus;
+  isPrimary?: boolean;
   fileRef: (el: HTMLInputElement | null) => void;
   onSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRemove: () => void; className?: string;
+  onRemove: () => void;
+  className?: string;
 }) {
   return (
-    <div className={`relative rounded-[16px] overflow-hidden ${isPrimary ? 'aspect-[3/4]' : 'aspect-square'} ${className}`}
-      style={{ background: photo ? undefined : 'hsl(var(--color-primary-ultra-light))', border: photo ? 'none' : '2px dashed hsl(var(--color-primary-light))' }}>
+    <div
+      className={`relative rounded-[16px] overflow-hidden ${isPrimary ? 'aspect-[3/4]' : 'aspect-square'} ${className}`}
+      style={{
+        background: photo ? undefined : 'hsl(var(--color-primary-ultra-light))',
+        border: photo ? 'none' : '2px dashed hsl(var(--color-primary-light))',
+      }}
+    >
+      {status === 'selecting' && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-background/70">
+          <Loader2 size={22} className="animate-spin text-primary" />
+          <span className="text-[11px] text-muted-foreground">מכין תמונה…</span>
+        </div>
+      )}
       {photo ? (
         <>
-          <img src={photo} alt="" className="w-full h-full object-cover" />
-          <button onClick={onRemove} className="absolute top-2 start-2 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'rgba(239, 68, 68, 0.8)' }}>
+          <img src={photo} alt="" className="h-full w-full object-cover" />
+          <button
+            type="button"
+            onClick={onRemove}
+            className="absolute top-2 start-2 flex h-6 w-6 items-center justify-center rounded-full"
+            style={{ background: 'rgba(239, 68, 68, 0.8)' }}
+          >
             <X size={14} className="text-white" />
           </button>
           {isPrimary && (
             <div className="absolute bottom-2 inset-x-0 flex justify-center">
-              <span className="text-[11px] font-medium px-3 py-1 rounded-full text-primary-foreground" style={{ background: 'hsl(var(--color-primary))' }}>ראשית</span>
+              <span
+                className="rounded-full px-3 py-1 text-[11px] font-medium text-primary-foreground"
+                style={{ background: 'hsl(var(--color-primary))' }}
+              >
+                ראשית
+              </span>
             </div>
           )}
         </>
       ) : (
-        <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer gap-1">
-          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" className="hidden" onChange={onSelect} />
+        <label className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+            className="hidden"
+            onChange={onSelect}
+            disabled={status === 'selecting'}
+          />
           <Plus size={24} className="text-primary-light" />
+          {status === 'failed' && (
+            <span className="px-2 text-center text-[11px] text-destructive">נכשל — נסו שוב</span>
+          )}
+          {isPrimary && status === 'idle' && (
+            <span className="px-2 text-center text-[11px] text-primary">חובה</span>
+          )}
         </label>
       )}
     </div>
@@ -922,7 +1054,8 @@ function onboardingPhotosIncomplete(
     imageUploadStatus: 'pending' | 'success' | 'failed';
   },
 ): boolean {
-  if (expectedCount === 0) return false;
+  // Profile photo is mandatory for new registrations.
+  if (expectedCount < 1) return true;
   return (
     result.photoUrls.length === 0 ||
     result.partialFailure === true ||
@@ -1000,24 +1133,41 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
       }
       if (cancelled) return;
 
-      const photosExpected = photoSources.length > 0 || getExpectedPhotoCount() > 0;
+      if (photoSources.length === 0) {
+        if (!cancelled) toast.error('טעינת התמונה נכשלה. נסה/י שוב');
+        return;
+      }
 
-      if (photoSources.length > 0 || photosExpected) {
-        try {
-          const saved = localStorage.getItem('clicks_onboarding');
-          const parsed = saved ? (JSON.parse(saved) as Record<string, unknown>) : {};
-          const draft = onboardingDataToDraft(parsed);
-          await finalizeOnboardingProfile(session.user.id, draft, photoSources, { photosExpected });
-        } catch (e) {
-          console.warn('[VerifyStep] session restore finalize skipped', e);
+      try {
+        const saved = localStorage.getItem('clicks_onboarding');
+        const parsed = saved ? (JSON.parse(saved) as Record<string, unknown>) : {};
+        const draft = onboardingDataToDraft(parsed);
+        await finalizeOnboardingProfile(session.user.id, draft, photoSources, {
+          photosExpected: true,
+        });
+
+        if (!voiceIntroDraftRef.current) {
+          const voiceRecord = await loadOnboardingVoice(getOnboardingSessionId());
+          if (voiceRecord) {
+            voiceIntroDraftRef.current = {
+              blob: voiceRecord.blob,
+              durationSec: voiceRecord.durationSec,
+              mimeType: voiceRecord.mimeType,
+            };
+          }
+        }
+        const voiceOk = await uploadVoiceIntroAfterProfile(
+          session.user.id,
+          voiceIntroDraftRef.current,
+        );
+        if (!voiceOk) {
+          if (!cancelled) toast.error(getHebrewOnboardingMessage('voice_upload_failed'));
           return;
         }
-        // Completion guard: photos were expected but none could be restored — do not
-        // silently route forward as complete; let the user re-add a photo.
-        if (photosExpected && photoSources.length === 0) {
-          if (!cancelled) toast.error('טעינת התמונה נכשלה. נסה/י שוב');
-          return;
-        }
+        await markOnboardingProfileCompletedIfReady(session.user.id);
+      } catch (e) {
+        console.warn('[VerifyStep] session restore finalize skipped', e);
+        return;
       }
 
       const { route } = await resolvePostAuthRedirect(session.user.id);
@@ -1028,7 +1178,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
     return () => {
       cancelled = true;
     };
-  }, [navigate, photosDraftRef, postAuthBusy, verifying]);
+  }, [navigate, photosDraftRef, postAuthBusy, verifying, voiceIntroDraftRef, getOnboardingSessionId]);
 
   const phoneClean = (() => {
     const fromData = (data.phone ?? '').replace(/[-\s]/g, '').replace(/^0/, '');
@@ -1091,7 +1241,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         /* ignore durable restore */
       }
     }
-    const photosExpected = onboardingPhotos.length > 0 || getExpectedPhotoCount() > 0;
+    // New registrations always require a profile photo.
+    const photosExpected = true;
     const draft = onboardingDataToDraft(data as Record<string, unknown>);
 
     if (!voiceIntroDraftRef.current) {
@@ -1300,8 +1451,13 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         voiceIntroDraftRef.current = null;
         void clearOnboardingVoice();
       }
-      photosDraftRef.current = [];
       clearPendingOtp();
+
+      if (result.voiceUploadOk === false) {
+        toast.error(getHebrewOnboardingMessage('voice_upload_failed'));
+        setPostAuthBusy(false);
+        return;
+      }
 
       if (result.profileSyncFailed) {
         toast.warning(getHebrewOnboardingMessage('onboarding_finalize_partial'));
@@ -1309,7 +1465,7 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         return;
       }
       // Photos were selected but could not be restored/uploaded — do not show fake success.
-      if (photosExpected && onboardingPhotos.length === 0) {
+      if (onboardingPhotos.length === 0) {
         toast.error('טעינת התמונה נכשלה. נסה/י שוב');
         setPostAuthBusy(false);
         return;
@@ -1319,6 +1475,8 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
         setPostAuthBusy(false);
         return;
       }
+
+      photosDraftRef.current = [];
 
       if (result.route === '/clicks' || result.route === '/pending-review') {
         notifyProfileUpdated(result.userId);
@@ -1343,10 +1501,15 @@ function VerifyStep({ data, updateData, clearData }: { data: any; updateData: an
           password,
           lastRegistrationCodeRef.current,
           photosExpected,
+          voiceIntroDraftRef.current,
         );
         if (recovery.recovered) {
           if (onboardingPhotosIncomplete(onboardingPhotos.length, recovery)) {
             toast.error(getHebrewOnboardingMessage('photo_upload_partial'));
+            return;
+          }
+          if (recovery.voiceUploadOk === false) {
+            toast.error(getHebrewOnboardingMessage('voice_upload_failed'));
             return;
           }
           clearPendingOtp();

@@ -5,6 +5,8 @@ import { canViewEventParticipantStats } from '@/lib/eventPermissions';
 
 const DEFAULT_MONTHLY_EVENT_CAP = 3;
 
+export type EventAudienceGroup = 'A' | 'B' | 'ALL';
+
 export interface EventRow {
   id: string;
   name: string;
@@ -20,6 +22,8 @@ export interface EventRow {
   reserved_new_spots: number;
   requires_subscription: boolean;
   gender_balance_target: number;
+  /** A = approved group A, B = approved group B, ALL = both */
+  audience_group?: EventAudienceGroup | string | null;
   status: 'open' | 'almost_full' | 'full' | 'past' | 'cancelled' | 'pending_review' | 'rejected';
   is_past_voting_open: boolean;
   created_at: string;
@@ -61,17 +65,57 @@ export interface EventRegistration {
   created_at: string;
 }
 
+export type ViewerEventAccess = {
+  isShadowUser: boolean;
+  /** Approved Group B only when shadow + is_shadow + moderation approved */
+  isApprovedGroupB?: boolean;
+  /** Approved Group A */
+  isApprovedGroupA?: boolean;
+  isSuperUser?: boolean;
+};
+
+function normalizeAudience(ag: unknown): EventAudienceGroup {
+  if (ag === 'A' || ag === 'B' || ag === 'ALL') return ag;
+  return 'ALL';
+}
+
+function viewerCanSeeAudience(viewer: ViewerEventAccess, audience: EventAudienceGroup): boolean {
+  if (viewer.isSuperUser) return true;
+  if (viewer.isApprovedGroupA) return audience === 'A' || audience === 'ALL';
+  if (viewer.isApprovedGroupB) return audience === 'B' || audience === 'ALL';
+  // Pending B / unassigned — no event access (matches RLS)
+  return false;
+}
+
 async function filterEventsByHostIsolation(
   events: EventRow[],
-  isShadowUser: boolean,
+  isShadowUserOrViewer: boolean | ViewerEventAccess,
 ): Promise<EventRow[]> {
-  const hostIds = [...new Set(events.map((e) => e.host_id).filter(Boolean) as string[])];
+  const viewer: ViewerEventAccess =
+    typeof isShadowUserOrViewer === 'boolean'
+      ? {
+          // Legacy boolean is unsafe for B-approval gate — deny until callers pass ViewerEventAccess.
+          isShadowUser: isShadowUserOrViewer,
+          isApprovedGroupB: false,
+          isApprovedGroupA: !isShadowUserOrViewer,
+        }
+      : isShadowUserOrViewer;
+
+  const afterAudience = events.filter((e) =>
+    viewerCanSeeAudience(viewer, normalizeAudience(e.audience_group)),
+  );
+
+  const hostIds = [...new Set(afterAudience.map((e) => e.host_id).filter(Boolean) as string[])];
   if (hostIds.length === 0) {
-    return isShadowUser ? [] : events;
+    // Hostless: approved A sees A/ALL hostless; approved B sees B/ALL hostless
+    return afterAudience.filter((e) => {
+      if (e.host_id) return false;
+      return viewerCanSeeAudience(viewer, normalizeAudience(e.audience_group));
+    });
   }
   const { data: hosts } = await supabase
     .from('profiles')
-    .select('user_id, is_shadow, suitability_status, super_role')
+    .select('user_id, is_shadow, suitability_status, moderation_status, super_role')
     .in('user_id', hostIds);
 
   const allowedHosts = new Set(
@@ -79,20 +123,27 @@ async function filterEventsByHostIsolation(
       .filter((h) => {
         if (h.super_role) return true;
         const sh = !!h.is_shadow;
-        const activeNormal = h.suitability_status === 'active' && !sh;
-        const shadowHost = h.suitability_status === 'shadow' && sh;
-        return isShadowUser ? shadowHost : activeNormal;
+        const modOk = (h.moderation_status ?? 'pending') === 'approved';
+        const activeNormal = h.suitability_status === 'active' && !sh && modOk;
+        const shadowHost = h.suitability_status === 'shadow' && sh && modOk;
+        if (viewer.isApprovedGroupB) return shadowHost;
+        if (viewer.isApprovedGroupA) return activeNormal;
+        return false;
       })
       .map((h) => h.user_id),
   );
 
-  return events.filter((e) => {
-    if (!e.host_id) return !isShadowUser;
+  return afterAudience.filter((e) => {
+    if (!e.host_id) {
+      return viewerCanSeeAudience(viewer, normalizeAudience(e.audience_group));
+    }
     return allowedHosts.has(e.host_id);
   });
 }
 
-export async function getUpcomingEvents(isShadowUser = false): Promise<EventRow[]> {
+export async function getUpcomingEvents(
+  viewer: boolean | ViewerEventAccess = false,
+): Promise<EventRow[]> {
   const today = new Date().toISOString().split('T')[0];
   const { data, error } = await supabase
     .from('events')
@@ -101,10 +152,12 @@ export async function getUpcomingEvents(isShadowUser = false): Promise<EventRow[
     .gte('date', today)
     .order('date', { ascending: true });
   if (error) throw error;
-  return filterEventsByHostIsolation((data || []) as EventRow[], isShadowUser);
+  return filterEventsByHostIsolation((data || []) as EventRow[], viewer);
 }
 
-export async function getPastEvents(isShadowUser = false): Promise<EventRow[]> {
+export async function getPastEvents(
+  viewer: boolean | ViewerEventAccess = false,
+): Promise<EventRow[]> {
   const { data, error } = await supabase
     .from('events')
     .select('*')
@@ -112,7 +165,7 @@ export async function getPastEvents(isShadowUser = false): Promise<EventRow[]> {
     .order('date', { ascending: false })
     .limit(20);
   if (error) throw error;
-  return filterEventsByHostIsolation((data || []) as EventRow[], isShadowUser);
+  return filterEventsByHostIsolation((data || []) as EventRow[], viewer);
 }
 
 export interface CalendarEvent extends EventRow {
@@ -129,7 +182,7 @@ export async function getCalendarEvents(
   startDate: string,
   endDate: string,
   currentUserId?: string,
-  isShadowUser = false,
+  viewer: boolean | ViewerEventAccess = false,
 ): Promise<CalendarEvent[]> {
   const { data: events, error } = await supabase
     .from('events')
@@ -142,7 +195,7 @@ export async function getCalendarEvents(
   if (error) throw error;
   if (!events || events.length === 0) return [];
 
-  const filtered = await filterEventsByHostIsolation(events as EventRow[], isShadowUser);
+  const filtered = await filterEventsByHostIsolation(events as EventRow[], viewer);
 
   const ranked = currentUserId
     ? await rankEventsForViewer(filtered, currentUserId)
@@ -319,18 +372,18 @@ export async function rankEventsForViewer(
 }
 
 export async function getUpcomingEventsRanked(
-  isShadowUser = false,
+  viewer: boolean | ViewerEventAccess = false,
   viewerId?: string,
 ): Promise<RankedEventRow[]> {
-  const events = await getUpcomingEvents(isShadowUser);
+  const events = await getUpcomingEvents(viewer);
   return rankEventsForViewer(events, viewerId);
 }
 
 export async function getPastEventsRanked(
-  isShadowUser = false,
+  viewer: boolean | ViewerEventAccess = false,
   viewerId?: string,
 ): Promise<RankedEventRow[]> {
-  const events = await getPastEvents(isShadowUser);
+  const events = await getPastEvents(viewer);
   return rankEventsForViewer(events, viewerId);
 }
 
@@ -343,7 +396,7 @@ function logEventDev(message: string, detail?: Record<string, unknown>) {
 
 export async function getEventById(
   eventId: string,
-  isShadowUser = false,
+  viewer: boolean | ViewerEventAccess = false,
 ): Promise<EventRow | null> {
   const trimmed = eventId?.trim();
   if (!trimmed) {
@@ -371,9 +424,9 @@ export async function getEventById(
     return null;
   }
 
-  const [visible] = await filterEventsByHostIsolation([data as EventRow], isShadowUser);
+  const [visible] = await filterEventsByHostIsolation([data as EventRow], viewer);
   if (!visible) {
-    logEventDev('EVENT NOT FOUND', { eventId: trimmed, reason: 'host_isolation' });
+    logEventDev('EVENT NOT FOUND', { eventId: trimmed, reason: 'audience_or_host_isolation' });
     return null;
   }
 
@@ -888,7 +941,7 @@ export async function createMemberEvent(
 /** Next upcoming event the user is registered for (by date/time). */
 export async function getNextRegisteredUpcomingEvent(
   userId: string,
-  isShadowUser = false,
+  viewer: boolean | ViewerEventAccess = false,
 ): Promise<EventRow | null> {
   if (!userId) return null;
 
@@ -913,7 +966,7 @@ export async function getNextRegisteredUpcomingEvent(
 
   if (evErr || !events?.length) return null;
 
-  const visible = await filterEventsByHostIsolation(events as EventRow[], isShadowUser);
+  const visible = await filterEventsByHostIsolation(events as EventRow[], viewer);
   return visible[0] ?? null;
 }
 

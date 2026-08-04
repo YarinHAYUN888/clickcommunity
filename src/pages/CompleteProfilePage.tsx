@@ -43,7 +43,7 @@ export default function CompleteProfilePage() {
   }
 
   return (
-    <AnimatedBackground className="min-h-screen flex items-center justify-center px-6 py-16">
+    <AnimatedBackground className="items-center justify-center px-6 py-16">
       <GlassCard variant="strong" className="max-w-md w-full p-8 md:p-10 text-center space-y-5">
         <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
           <UserRoundPen size={28} className="text-primary" />

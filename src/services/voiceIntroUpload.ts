@@ -1,25 +1,44 @@
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
 import type { VoiceIntroDraft } from '@/contexts/OnboardingContext';
 import { extensionForMime, VOICE_INTRO_MIN_SEC, VOICE_INTRO_MAX_SEC } from '@/services/voiceIntroRecording';
 
 /**
- * After profile upsert + auth session exists. Never throws — signup must complete.
- * Writes voice_intro_status failed on any failure; uploaded + path on success.
+ * After auth session exists. Uploads voice intro under auth uid folder.
+ * Returns false when draft missing, invalid, or upload fails — never pretends success.
+ * Idempotent enough for retries: new path each attempt; profile path overwritten on success.
  */
 export async function uploadVoiceIntroAfterProfile(
   userId: string,
   draft: VoiceIntroDraft,
 ): Promise<boolean> {
   if (!draft || !draft.blob || draft.blob.size < 1) {
-    console.info('[voiceIntroUpload] skip_no_draft', { userId });
-    return true;
+    console.info('[voiceIntroUpload] missing_draft', { userId });
+    return false;
   }
 
   const duration = draft.durationSec;
   if (duration < VOICE_INTRO_MIN_SEC - 0.5 || duration > VOICE_INTRO_MAX_SEC + 0.5) {
-    console.warn('[voiceIntroUpload] skip_invalid_duration', { userId, duration });
-    return true;
+    console.warn('[voiceIntroUpload] invalid_duration', { userId, duration });
+    return false;
+  }
+
+  // Already uploaded for this session? Skip re-upload if profile already has a playable intro.
+  try {
+    const { data: existing } = await supabase
+      .from('profiles')
+      .select('voice_intro_url, voice_intro_status')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (
+      existing?.voice_intro_status === 'uploaded' &&
+      typeof existing.voice_intro_url === 'string' &&
+      existing.voice_intro_url.startsWith(`${userId}/`)
+    ) {
+      console.info('[voiceIntroUpload] already_uploaded', { userId, path: existing.voice_intro_url });
+      return true;
+    }
+  } catch {
+    /* continue with upload */
   }
 
   const mime = draft.mimeType || draft.blob.type || 'audio/webm';
@@ -85,7 +104,6 @@ export async function uploadVoiceIntroAfterProfile(
       console.error('[voiceIntroUpload] failed_status_update_error', failErr);
     }
 
-    toast.message('לא הצלחנו לשמור את ההקלטה הקולית כרגע. אפשר להמשיך — תמיד אפשר לעדכן בהמשך מהפרופיל.');
     return false;
   }
 }

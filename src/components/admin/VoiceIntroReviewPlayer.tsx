@@ -59,6 +59,7 @@ export function VoiceIntroReviewPlayer({
   isActive = true,
   onRequestPlay,
   hideDownload = false,
+  compact = false,
 }: {
   objectPath: string | null;
   durationSeconds: number | null;
@@ -67,6 +68,8 @@ export function VoiceIntroReviewPlayer({
   isActive?: boolean;
   onRequestPlay?: () => void;
   hideDownload?: boolean;
+  /** List-row mode: play/pause only, skip waveform decode. */
+  compact?: boolean;
 }) {
   const [loading, setLoading] = useState(!lazy);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +81,7 @@ export function VoiceIntroReviewPlayer({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const signedUrlRef = useRef<string | null>(null);
+  const pendingPlayRef = useRef(false);
 
   const hasSource = userId || objectPath?.trim();
 
@@ -111,19 +115,22 @@ export function VoiceIntroReviewPlayer({
       setSignedUrl(url);
       signedUrlRef.current = url;
 
-      const res = await fetch(url, { signal: ac.signal });
-      if (!res.ok) throw new Error('fetch_failed');
-      const arr = await res.arrayBuffer();
-      if (ac.signal.aborted) return;
+      // Compact/list mode: signed URL is enough — do not fetch+decode the full file upfront.
+      if (!compact) {
+        const res = await fetch(url, { signal: ac.signal });
+        if (!res.ok) throw new Error('fetch_failed');
+        const arr = await res.arrayBuffer();
+        if (ac.signal.aborted) return;
 
-      const Ctx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (Ctx) {
-        const audioCtx = new Ctx();
-        const buf = await audioCtx.decodeAudioData(arr.slice(0));
-        if (!ac.signal.aborted) setAudioBuffer(buf);
-        await audioCtx.close().catch(() => undefined);
+        const Ctx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (Ctx) {
+          const audioCtx = new Ctx();
+          const buf = await audioCtx.decodeAudioData(arr.slice(0));
+          if (!ac.signal.aborted) setAudioBuffer(buf);
+          await audioCtx.close().catch(() => undefined);
+        }
       }
       if (!ac.signal.aborted) setLoaded(true);
     } catch (e) {
@@ -132,7 +139,7 @@ export function VoiceIntroReviewPlayer({
       setError('לא ניתן לטעון את ההקלטה');
     }
     if (!ac.signal.aborted) setLoading(false);
-  }, [hasSource, userId, objectPath]);
+  }, [hasSource, userId, objectPath, compact]);
 
   useEffect(() => {
     if (!lazy) void load();
@@ -190,13 +197,19 @@ export function VoiceIntroReviewPlayer({
         ? audioBuffer.duration
         : 0;
 
-  const startPlay = () => {
+  const startPlay = useCallback(() => {
     const el = audioRef.current;
-    if (!el) return;
+    if (!el) return false;
     onRequestPlay?.();
     void el.play().catch(() => setPlaying(false));
     setPlaying(true);
-  };
+    return true;
+  }, [onRequestPlay]);
+
+  useEffect(() => {
+    if (!pendingPlayRef.current || !loaded || !signedUrl) return;
+    if (startPlay()) pendingPlayRef.current = false;
+  }, [loaded, signedUrl, startPlay]);
 
   const toggle = async () => {
     if (playing) {
@@ -208,8 +221,15 @@ export function VoiceIntroReviewPlayer({
       return;
     }
     if (!loaded && lazy) {
+      pendingPlayRef.current = true;
+      onRequestPlay?.();
       await load();
-      if (!signedUrlRef.current) return;
+      if (!signedUrlRef.current) {
+        pendingPlayRef.current = false;
+        return;
+      }
+      // Audio element mounts on next paint; effect above starts playback.
+      return;
     }
     if (error || !signedUrlRef.current) return;
     startPlay();
@@ -239,25 +259,53 @@ export function VoiceIntroReviewPlayer({
       <button
         type="button"
         onClick={() => void toggle()}
-        className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10"
+        className={
+          compact
+            ? 'inline-flex h-9 w-9 items-center justify-center rounded-full border border-primary/40 bg-primary/5 text-primary'
+            : 'inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10'
+        }
+        aria-label="השמע הקלטה"
       >
-        <Play className="h-3.5 w-3.5" />
-        השמע הקלטה
+        <Play className="h-3.5 w-3.5 ms-0.5" />
+        {!compact && 'השמע הקלטה'}
       </button>
     );
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        טוען הקלטה…
+      <div
+        className={
+          compact
+            ? 'flex h-9 w-9 items-center justify-center'
+            : 'flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground'
+        }
+      >
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        {!compact && 'טוען הקלטה…'}
       </div>
     );
   }
 
   if (error || !signedUrl) {
-    return <p className="text-xs text-muted-foreground">{error || 'אין נתוני הקלטה'}</p>;
+    return compact ? null : <p className="text-xs text-muted-foreground">{error || 'אין נתוני הקלטה'}</p>;
+  }
+
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1">
+        <audio ref={audioRef} src={signedUrl} preload="metadata" className="hidden" />
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.96 }}
+          onClick={() => void toggle()}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          aria-label={playing ? 'עצור' : 'נגן'}
+        >
+          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ms-0.5" />}
+        </motion.button>
+      </div>
+    );
   }
 
   return (

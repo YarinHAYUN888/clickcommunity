@@ -6,9 +6,14 @@ interface AnimatedBackgroundProps {
   className?: string;
 }
 
+/**
+ * Full-viewport atmospheric shell.
+ * Layout classes (flex/center/padding) are applied to the inner content layer so
+ * centering works correctly. Uses 100dvh with min-h-screen fallback for iOS Safari.
+ */
 export default function AnimatedBackground({ children, className }: AnimatedBackgroundProps) {
   return (
-    <div className={cn('relative min-h-screen overflow-hidden gradient-bg', className)}>
+    <div className="relative min-h-screen min-h-[100dvh] overflow-hidden gradient-bg">
       {/* Blob 1 */}
       <div
         className="pointer-events-none absolute top-10 -end-20 w-[300px] h-[300px] rounded-full animate-blob-1"
@@ -24,7 +29,14 @@ export default function AnimatedBackground({ children, className }: AnimatedBack
         className="pointer-events-none absolute bottom-20 start-1/3 w-[350px] h-[350px] rounded-full animate-blob-3"
         style={{ background: 'rgba(91, 33, 182, 0.05)', filter: 'blur(80px)' }}
       />
-      <div className="relative z-10">{children}</div>
+      <div
+        className={cn(
+          'relative z-10 flex w-full flex-col min-h-screen min-h-[100dvh]',
+          className,
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }

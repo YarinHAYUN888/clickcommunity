@@ -25,7 +25,7 @@ export default function EventDetailPage() {
   const { authId, role, profile } = useCurrentUser();
   const isAdmin = !!profile?.super_role || profile?.role === 'admin';
   const { loading: accessLoading, hasAccess, displayCount } = useIncomingClickCount(authId, isAdmin);
-  const { isShadowUser } = useUserMode();
+  const { eventViewerAccess, loading: modeLoading } = useUserMode();
   const { superRole } = useAdmin();
   const canViewStats = canViewEventParticipantStats(superRole);
   const [event, setEvent] = useState<EventRow | null>(null);
@@ -45,7 +45,7 @@ export default function EventDetailPage() {
   const [monthlyUsage, setMonthlyUsage] = useState<{ used: number; cap: number } | null>(null);
 
   useEffect(() => {
-    if (!eventId || accessLoading) return;
+    if (!eventId || accessLoading || modeLoading) return;
     if (!hasAccess) {
       setLoading(false);
       return;
@@ -59,7 +59,7 @@ export default function EventDetailPage() {
     }
 
     void (async () => {
-      const ev = await getEventById(eventId, isShadowUser);
+      const ev = await getEventById(eventId, eventViewerAccess);
       if (cancelled) return;
 
       setEvent(ev);
@@ -90,7 +90,7 @@ export default function EventDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [eventId, authId, canViewStats, isShadowUser, accessLoading, hasAccess]);
+  }, [eventId, authId, canViewStats, eventViewerAccess, accessLoading, modeLoading, hasAccess]);
 
   useEffect(() => {
     if (role !== 'member' || !authId) {

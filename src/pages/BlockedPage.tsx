@@ -26,7 +26,7 @@ export default function BlockedPage() {
   }
 
   return (
-    <AnimatedBackground className="min-h-screen flex items-center justify-center px-6 py-16">
+    <AnimatedBackground className="items-center justify-center px-6 py-16">
       <GlassCard variant="strong" className="max-w-md w-full p-8 md:p-10 text-center transition-all duration-500">
         <h1 className="text-xl md:text-2xl font-bold text-foreground mb-4 leading-snug">
           הגישה למערכת חסומה

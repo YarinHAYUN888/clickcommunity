@@ -35,7 +35,10 @@ async function analyzeViaEdge(
 }
 
 /**
- * After OTP: AI + image checks, persist suitability fields on profiles (by auth user_id).
+ * After OTP: AI + image checks, persist suitability via service-role Edge
+ * (privileged columns cannot be set by the user JWT).
+ *
+ * Shadow candidates stay moderation=pending until a community admin approves Group B.
  */
 export async function runUserAnalysis(
   profileData: RunUserAnalysisPayload,
@@ -64,32 +67,34 @@ export async function runUserAnalysis(
     aiConfidence: aiResult.confidence,
   });
   const risk_flags = [...decision.risk_flags, ...aiResult.flags.map((r) => `ai:${r}`)];
-  const moderationStatus =
-    decision.status === 'active'
-      ? 'approved'
-      : decision.status === 'blocked'
-        ? 'rejected'
-        : 'pending';
 
-  const { error } = await supabase
-    .from('profiles')
-    .update({
+  const { data, error } = await supabase.functions.invoke('apply-registration-suitability', {
+    body: {
       suitability_status: decision.status,
       is_shadow: decision.is_shadow,
       risk_flags,
       ai_summary: [decision.ai_summary, ...aiResult.reasons].filter(Boolean).join(' · '),
-      moderation_status: moderationStatus,
       moderation_reason: aiResult.reason,
       moderation_confidence: aiResult.confidence,
       moderation_flags: aiResult.flags,
-    })
-    .eq('user_id', authUserId);
+    },
+  });
 
   if (error) {
-    console.error('runUserAnalysis update failed:', error);
+    console.error('runUserAnalysis apply failed:', error);
     throw error;
   }
+  const body = data as { ok?: boolean; error?: string; moderation_status?: string };
+  if (!body?.ok) {
+    console.error('runUserAnalysis apply rejected:', body);
+    throw new Error(body?.error || 'suitability_apply_failed');
+  }
+
   if (import.meta.env.DEV) {
-    console.info('[runUserAnalysis] success', { authUserId, moderationStatus, suitability: decision.status });
+    console.info('[runUserAnalysis] success', {
+      authUserId,
+      moderationStatus: body.moderation_status,
+      suitability: decision.status,
+    });
   }
 }

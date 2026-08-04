@@ -1,5 +1,6 @@
 import { isValidLifeNiche } from '@/data/lifeNiche';
 import type { SupabaseProfile } from '@/hooks/useCurrentUser';
+import { hasPlayableVoiceIntro } from '@/lib/admin/voiceIntroAccess';
 
 export type DbNewUserRole = 'guest' | 'member';
 export const DEFAULT_NEW_USER_ROLE_FALLBACK: DbNewUserRole = 'guest';
@@ -33,12 +34,19 @@ type ProfileLike = Pick<
   | 'profile_completed'
 >;
 
+export type ProfileAssetsLike = {
+  photos?: string[] | null;
+  avatar_url?: string | null;
+  voice_intro_url?: string | null;
+  voice_intro_status?: string | null;
+};
+
 export function hasQuestionnaireResponses(q: unknown): boolean {
   if (!q || typeof q !== 'object') return false;
   return Object.keys(q as Record<string, unknown>).length > 0;
 }
 
-/** Required onboarding fields — photos are optional for completion gates. */
+/** Required onboarding text/questionnaire fields (assets checked separately). */
 export function hasRequiredOnboardingFields(p: ProfileLike | null | undefined): boolean {
   if (!p) return false;
   const fn = (p.first_name || '').trim();
@@ -51,6 +59,30 @@ export function hasRequiredOnboardingFields(p: ProfileLike | null | undefined): 
   return hasQuestionnaireResponses(p.questionnaire_responses);
 }
 
+export function hasDisplayPhoto(p: {
+  photos?: string[] | null;
+  avatar_url?: string | null;
+} | null | undefined): boolean {
+  if (!p) return false;
+  if (Array.isArray(p.photos) && p.photos.some((u) => typeof u === 'string' && u.trim().length > 0)) {
+    return true;
+  }
+  return typeof p.avatar_url === 'string' && p.avatar_url.trim().length > 0;
+}
+
+/** New registrations: profile photo + voice intro must both be stored in backend. */
+export function hasRequiredOnboardingAssets(p: ProfileAssetsLike | null | undefined): boolean {
+  if (!p) return false;
+  return hasDisplayPhoto(p) && hasPlayableVoiceIntro(p);
+}
+
+/** Full onboarding completion for new signups — text fields + backend assets. */
+export function isOnboardingFullyComplete(
+  p: (ProfileLike & ProfileAssetsLike) | null | undefined,
+): boolean {
+  return hasRequiredOnboardingFields(p) && hasRequiredOnboardingAssets(p);
+}
+
 export function deriveProfileCompletionStatus(
   p: ProfileLike | null | undefined,
 ): ProfileCompletionStatus {
@@ -61,15 +93,4 @@ export function deriveProfileCompletionStatus(
   if (mod === 'pending') return 'pending_review';
   if (p.profile_completed === true && hasRequiredOnboardingFields(p)) return 'approved';
   return 'incomplete';
-}
-
-export function hasDisplayPhoto(p: {
-  photos?: string[] | null;
-  avatar_url?: string | null;
-} | null | undefined): boolean {
-  if (!p) return false;
-  if (Array.isArray(p.photos) && p.photos.some((u) => typeof u === 'string' && u.trim().length > 0)) {
-    return true;
-  }
-  return typeof p.avatar_url === 'string' && p.avatar_url.trim().length > 0;
 }

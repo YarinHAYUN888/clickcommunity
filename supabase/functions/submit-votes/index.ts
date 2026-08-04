@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { userHasEventAccess } from "../_shared/eventAccess.ts";
+import { assertEventParticipantAccess, fetchEventAccessProfile } from "../_shared/eventAccess.ts";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
 const ALLOWED_VOTES = new Set(["clicked", "no_click"]);
@@ -29,28 +29,41 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: voterProfile } = await supabase
-      .from("profiles")
-      .select("super_role, role")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    const allowed = await userHasEventAccess(supabase, user.id, voterProfile);
-    if (!allowed) {
-      return new Response(
-        JSON.stringify({
-          error: "insufficient_clicks",
-          message: "נדרשים 5 קליקים ממשתמשים אחרים",
-        }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
     const { event_id, votes } = await req.json();
     if (!event_id || !votes || !Array.isArray(votes)) {
       return new Response(JSON.stringify({ error: "event_id and votes array required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const { data: event } = await supabase
+      .from("events")
+      .select("status, is_past_voting_open, audience_group")
+      .eq("id", event_id)
+      .maybeSingle();
+
+    if (!event || event.status !== "past") {
+      return new Response(JSON.stringify({ error: "Voting not available for this event" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!event.is_past_voting_open) {
+      return new Response(JSON.stringify({ error: "Voting window is closed for this event" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const voterProfile = await fetchEventAccessProfile(supabase, user.id);
+    const gate = await assertEventParticipantAccess(supabase, user.id, event, voterProfile);
+    if (!gate.ok) {
+      return new Response(
+        JSON.stringify({
+          error: gate.error,
+          message: gate.message,
+        }),
+        { status: gate.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const { data: registration } = await supabase
@@ -63,24 +76,6 @@ Deno.serve(async (req) => {
 
     if (!registration) {
       return new Response(JSON.stringify({ error: "You did not attend this event" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { data: event } = await supabase
-      .from("events")
-      .select("status, is_past_voting_open")
-      .eq("id", event_id)
-      .maybeSingle();
-
-    if (!event || event.status !== "past") {
-      return new Response(JSON.stringify({ error: "Voting not available for this event" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!event.is_past_voting_open) {
-      return new Response(JSON.stringify({ error: "Voting window is closed for this event" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

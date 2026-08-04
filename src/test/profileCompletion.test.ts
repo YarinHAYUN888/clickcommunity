@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasRequiredOnboardingFields,
+  hasRequiredOnboardingAssets,
+  isOnboardingFullyComplete,
   deriveProfileCompletionStatus,
 } from '@/lib/profileCompletion';
 
@@ -26,5 +28,30 @@ describe('profileCompletion', () => {
 
   it('incomplete without niche', () => {
     expect(hasRequiredOnboardingFields({ ...base, life_niche: null })).toBe(false);
+  });
+
+  it('requires photo + uploaded voice for full onboarding assets', () => {
+    expect(
+      hasRequiredOnboardingAssets({
+        photos: ['https://example.com/a.jpg'],
+        voice_intro_url: 'uid/intro-1.webm',
+        voice_intro_status: 'uploaded',
+      }),
+    ).toBe(true);
+    expect(
+      hasRequiredOnboardingAssets({
+        photos: ['https://example.com/a.jpg'],
+        voice_intro_url: 'uid/intro-1.webm',
+        voice_intro_status: 'failed',
+      }),
+    ).toBe(false);
+    expect(
+      isOnboardingFullyComplete({
+        ...base,
+        photos: ['https://example.com/a.jpg'],
+        voice_intro_url: 'uid/intro-1.webm',
+        voice_intro_status: 'uploaded',
+      }),
+    ).toBe(true);
   });
 });

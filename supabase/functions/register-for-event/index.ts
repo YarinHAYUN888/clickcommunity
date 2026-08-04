@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { jsonResponse, optionsOk, requireAuthUser } from "../_shared/edgeAuth.ts";
-import { userHasEventAccess } from "../_shared/eventAccess.ts";
+import { assertEventParticipantAccess, fetchEventAccessProfile } from "../_shared/eventAccess.ts";
 
 function generateUniqueCode() {
   return "EVT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -151,14 +151,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: profile, error: profileError } = await admin
-      .from("profiles")
-      .select("role, super_role, subscription_status")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (profileError) {
-      console.error("REGISTRATION FAILED", { stage: "profile_lookup", message: profileError.message });
+    const profile = await fetchEventAccessProfile(admin, userId);
+    if (!profile) {
+      console.error("REGISTRATION FAILED", { stage: "profile_lookup" });
       return jsonResponse({
         ok: false,
         error_code: "server_error",
@@ -166,16 +161,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Load subscription_status separately (not on EventAccessProfile)
+    const { data: subRow } = await admin
+      .from("profiles")
+      .select("subscription_status")
+      .eq("user_id", userId)
+      .maybeSingle();
+
     const role = profile?.super_role ? "admin" : profile?.role;
     const requiresSubscription = event.requires_subscription === true;
     console.log("SUBSCRIPTION REQUIRED", requiresSubscription);
 
-    const hasEventAccess = await userHasEventAccess(admin, userId, profile);
-    if (!hasEventAccess) {
+    const gate = await assertEventParticipantAccess(admin, userId, event, profile);
+    if (!gate.ok) {
       return jsonResponse({
         ok: false,
-        error_code: "insufficient_clicks",
-        message: "נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע",
+        error_code: gate.error,
+        message: gate.error === "insufficient_clicks"
+          ? "נדרשים 5 קליקים ממשתמשים אחרים כדי להירשם לאירוע"
+          : gate.message,
       });
     }
 
@@ -199,7 +203,7 @@ Deno.serve(async (req) => {
       }
 
       const hasActiveSubscription =
-        !!activeSubscription || profile?.subscription_status === "active";
+        !!activeSubscription || subRow?.subscription_status === "active";
       console.log("SUBSCRIPTION STATUS", hasActiveSubscription ? "active" : "inactive");
 
       if (!hasActiveSubscription) {

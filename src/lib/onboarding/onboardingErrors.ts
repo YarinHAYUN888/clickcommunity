@@ -27,6 +27,8 @@ const HEBREW_MESSAGES: Record<OnboardingFlowErrorCode, string> = {
   profile_save_failed: 'לא הצלחנו לשמור את פרטי הפרופיל. נסה/י שוב.',
   photo_upload_partial:
     'חלק מהתמונות לא נשמרו. בדקו חיבור אינטרנט, גודל עד 5MB ופורמט נתמך (JPG/PNG/WEBP), ואז נסו שוב מעמוד הפרופיל.',
+  voice_upload_failed:
+    'לא הצלחנו לשמור את הקלטת ההיכרות. בדקו חיבור לאינטרנט ונסו שוב — אין צורך להתחיל הרשמה מחדש.',
   onboarding_finalize_partial:
     'החשבון נוצר בהצלחה, אך חלק מנתוני הפרופיל נשמרו חלקית. אפשר להשלים בעמוד הפרופיל.',
   auth_completion_sync_pending:
@@ -65,6 +67,7 @@ export function errorCodeFromMessage(message: string): OnboardingFlowErrorCode {
     'session_restore_failed',
     'profile_save_failed',
     'photo_upload_partial',
+    'voice_upload_failed',
     'onboarding_finalize_partial',
     'auth_completion_sync_pending',
   ];
@@ -90,6 +93,8 @@ export function verifyErrorCodeForStage(
       return 'profile_save_failed';
     case 'images':
       return 'photo_upload_partial';
+    case 'voice_upload':
+      return 'voice_upload_failed';
     case 'completion':
       return 'onboarding_finalize_partial';
     default:

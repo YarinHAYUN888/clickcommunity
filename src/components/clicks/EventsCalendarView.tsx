@@ -6,11 +6,13 @@ import { DayPicker } from 'react-day-picker';
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from 'date-fns';
 import { he } from 'date-fns/locale';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getCalendarEvents, CalendarEvent } from '@/services/events';
+import { getCalendarEvents, CalendarEvent, type ViewerEventAccess } from '@/services/events';
 
 interface EventsCalendarViewProps {
   currentUserId?: string;
+  /** @deprecated prefer eventViewerAccess */
   isShadowUser?: boolean;
+  eventViewerAccess?: ViewerEventAccess;
 }
 
 /* ---------- Day cell with event dots ---------- */
@@ -129,7 +131,12 @@ function DayEventRow({ event, index }: { event: CalendarEvent; index: number }) 
 }
 
 /* ---------- Main view ---------- */
-export default function EventsCalendarView({ currentUserId, isShadowUser = false }: EventsCalendarViewProps) {
+export default function EventsCalendarView({
+  currentUserId,
+  isShadowUser = false,
+  eventViewerAccess,
+}: EventsCalendarViewProps) {
+  const viewer: boolean | ViewerEventAccess = eventViewerAccess ?? isShadowUser;
   const [month, setMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -141,7 +148,7 @@ export default function EventsCalendarView({ currentUserId, isShadowUser = false
     setLoading(true);
     const startDate = format(startOfMonth(month), 'yyyy-MM-dd');
     const endDate = format(endOfMonth(month), 'yyyy-MM-dd');
-    getCalendarEvents(startDate, endDate, currentUserId, isShadowUser)
+    getCalendarEvents(startDate, endDate, currentUserId, viewer)
       .then(res => {
         if (active) setEvents(res);
       })
@@ -155,7 +162,7 @@ export default function EventsCalendarView({ currentUserId, isShadowUser = false
     return () => {
       active = false;
     };
-  }, [month, currentUserId, isShadowUser]);
+  }, [month, currentUserId, viewer]);
 
   // Group events by date for fast lookup
   const eventsByDate = useMemo(() => {

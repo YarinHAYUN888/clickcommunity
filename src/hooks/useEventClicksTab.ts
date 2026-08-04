@@ -36,7 +36,7 @@ function eventClickToFeedItem(click: EventClick): ClickFeedItem {
 }
 
 export function useEventClicksTab(authId: string | null | undefined) {
-  const { isShadowUser } = useUserMode();
+  const { eventViewerAccess, loading: modeLoading } = useUserMode();
   const [items, setItems] = useState<ClickFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
@@ -50,12 +50,13 @@ export function useEventClicksTab(authId: string | null | undefined) {
       setLoading(false);
       return;
     }
+    if (modeLoading) return;
 
     if (!silent) {
       setLoading(true);
     }
     try {
-      const event = await getNextRegisteredUpcomingEvent(authId, isShadowUser);
+      const event = await getNextRegisteredUpcomingEvent(authId, eventViewerAccess);
       if (!event) {
         setItems([]);
         setEventName(null);
@@ -75,11 +76,12 @@ export function useEventClicksTab(authId: string | null | undefined) {
     } finally {
       setLoading(false);
     }
-  }, [authId, isShadowUser]);
+  }, [authId, eventViewerAccess, modeLoading]);
 
   useEffect(() => {
+    if (modeLoading) return;
     void refresh();
-  }, [refresh]);
+  }, [refresh, modeLoading]);
 
   const removeFromFeed = useCallback((userId: string) => {
     setItems((prev) => prev.filter((i) => i.profile.user_id !== userId));

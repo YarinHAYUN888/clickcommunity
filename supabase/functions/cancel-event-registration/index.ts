@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { canAccessEventAudience, fetchEventAccessProfile, isEventAccessAdmin } from "../_shared/eventAccess.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,7 +45,7 @@ Deno.serve(async (req) => {
 
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id, date, time, status")
+      .select("id, date, time, status, audience_group")
       .eq("id", event_id)
       .single();
 
@@ -53,6 +54,17 @@ Deno.serve(async (req) => {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const profile = await fetchEventAccessProfile(supabase, user.id);
+    if (!isEventAccessAdmin(profile) && !canAccessEventAudience(profile, event.audience_group)) {
+      return new Response(
+        JSON.stringify({
+          error: "audience_forbidden",
+          message: "האירוע אינו זמין לקבוצה שלך",
+        }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     if (event.status === "past" || event.status === "cancelled") {

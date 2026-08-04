@@ -31,6 +31,7 @@ export type OnboardingFlowErrorCode =
   | 'session_restore_failed'
   | 'profile_save_failed'
   | 'photo_upload_partial'
+  | 'voice_upload_failed'
   | 'onboarding_finalize_partial'
   | 'auth_completion_sync_pending'
   | 'registration_invoke_transport'

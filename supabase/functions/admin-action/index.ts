@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         throw new Error(error.message || fallback);
       }
     };
-    const sanitizeEventDetails = (raw: Record<string, unknown>) => {
+    const sanitizeEventDetails = (raw: Record<string, unknown>, opts?: { requireAudience?: boolean }) => {
       const allowed = [
         "name",
         "description",
@@ -86,6 +86,7 @@ Deno.serve(async (req) => {
         "status",
         "is_past_voting_open",
         "host_id",
+        "audience_group",
       ] as const;
       const next: Record<string, unknown> = {};
       for (const key of allowed) {
@@ -102,6 +103,17 @@ Deno.serve(async (req) => {
         if (!["open", "almost_full", "full", "past", "cancelled", "pending_review", "rejected"].includes(s)) {
           delete next.status;
         }
+      }
+      if ("audience_group" in next) {
+        const ag = typeof next.audience_group === "string" ? next.audience_group.trim() : "";
+        if (!["A", "B", "ALL"].includes(ag)) {
+          delete next.audience_group;
+        } else {
+          next.audience_group = ag;
+        }
+      }
+      if (opts?.requireAudience && !["A", "B", "ALL"].includes(String(next.audience_group ?? ""))) {
+        return { error: "audience_group required (A, B, or ALL)" } as const;
       }
       return next;
     };
@@ -277,10 +289,13 @@ Deno.serve(async (req) => {
 
       // ---- Event Management ----
       case "create_event": {
-        const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>);
+        const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>, {
+          requireAudience: true,
+        });
+        if ("error" in safeDetails) return respondErr(String(safeDetails.error), 400);
         const { data: ev, error } = await supabaseAdmin.from("events").insert({
           ...safeDetails,
-          status: safeDetails.status ?? "open",
+          status: (safeDetails as Record<string, unknown>).status ?? "open",
           created_by: user.id,
         }).select().single();
         if (error) return respondErr(error.message);
@@ -288,6 +303,7 @@ Deno.serve(async (req) => {
       }
       case "update_event": {
         const safeDetails = sanitizeEventDetails((details || {}) as Record<string, unknown>);
+        if ("error" in safeDetails) return respondErr(String(safeDetails.error), 400);
         await supabaseAdmin.from("events").update(safeDetails).eq("id", target_id);
         return respond({});
       }

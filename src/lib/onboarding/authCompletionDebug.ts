@@ -17,6 +17,7 @@ export type AuthCompletionFailureStage =
   | 'session'
   | 'profile'
   | 'images'
+  | 'voice_upload'
   | 'completion';
 
 export function isAuthCompletionDebugEnabled(): boolean {

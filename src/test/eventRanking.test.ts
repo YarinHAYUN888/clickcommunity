@@ -23,6 +23,7 @@ const baseEvent = (id: string, date: string, time: string): EventRow => ({
   gender_balance_target: 0.5,
   status: 'open',
   is_past_voting_open: false,
+  audience_group: 'ALL',
   created_at: '',
   updated_at: '',
 });

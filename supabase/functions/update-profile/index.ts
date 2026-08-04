@@ -113,12 +113,20 @@ Deno.serve(async (req) => {
       "business_world",
     ]);
     const nicheOk = niche.length === 0 || allowedNiche.has(niche);
-    const profileCompleted =
-      fnOk &&
-      interestsOk &&
-      dob != null &&
-      gender.length > 0 &&
-      nicheOk;
+    const photosArr = Array.isArray(row.photos) ? (row.photos as unknown[]) : [];
+    const hasPhoto =
+      photosArr.some((u) => typeof u === "string" && u.trim().length > 0) ||
+      (typeof row.avatar_url === "string" && row.avatar_url.trim().length > 0);
+    const hasVoice =
+      typeof row.voice_intro_url === "string" &&
+      row.voice_intro_url.trim().length > 0 &&
+      row.voice_intro_status === "uploaded";
+    const alreadyCompleted = row.profile_completed === true;
+    const textOk =
+      fnOk && interestsOk && dob != null && gender.length > 0 && nicheOk;
+    // New completions require photo + voice. Legacy completed profiles are not downgraded
+    // solely for a missing voice intro.
+    const profileCompleted = textOk && (alreadyCompleted || (hasPhoto && hasVoice));
 
     if (profileCompleted !== row.profile_completed) {
       await auth.admin

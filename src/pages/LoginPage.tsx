@@ -57,7 +57,7 @@ export default function LoginPage() {
   };
 
   return (
-    <AnimatedBackground className="flex flex-col items-center justify-center px-6">
+    <AnimatedBackground className="items-center justify-center px-6">
       <BackToLandingButton />
 
       <motion.div

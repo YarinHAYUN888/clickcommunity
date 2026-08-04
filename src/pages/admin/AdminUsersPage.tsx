@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Search, Loader2, X, User } from 'lucide-react';
@@ -7,12 +7,58 @@ import GlassCard from '@/components/clicks/GlassCard';
 import PointsAdjustModal from '@/components/admin/PointsAdjustModal';
 import { VoiceIntroReviewPlayer } from '@/components/admin/VoiceIntroReviewPlayer';
 import { useAdmin } from '@/contexts/AdminContext';
-import { getAdminUsers, performAdminAction } from '@/services/admin';
+import { getAdminUsers, performAdminAction, updateProfileSuitability } from '@/services/admin';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { hasPlayableVoiceIntro, moderationDisplayLabel } from '@/lib/admin/voiceIntroAccess';
+import { avatarThumbUrl, profileAvatarSource } from '@/lib/media/avatarDisplay';
+import {
+  adminUserGroupLabel,
+  deriveAdminUserGroup,
+} from '@/lib/admin/userGroupLabels';
+import { notifyProfileUpdated } from '@/hooks/useCurrentUser';
+
+function AdminUserAvatar({
+  user,
+  sizeClass = 'w-10 h-10',
+}: {
+  user: { photos?: string[] | null; avatar_url?: string | null; first_name?: string | null };
+  sizeClass?: string;
+}) {
+  const raw = profileAvatarSource(user);
+  const src = avatarThumbUrl(raw, 80) || raw;
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return (
+      <div className={`${sizeClass} rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0`}>
+        <User size={18} className="text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${sizeClass} rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0`}>
+      <img
+        src={src}
+        alt={user.first_name || ''}
+        width={40}
+        height={40}
+        loading="lazy"
+        decoding="async"
+        className="h-full w-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
 
 const filters = [
   { key: '', label: 'כולם' },
+  { key: 'group_a', label: 'קבוצה A' },
+  { key: 'group_b', label: 'קבוצה B' },
+  { key: 'pending_review', label: 'דורשים אימות ידני' },
+  { key: 'unassigned', label: 'טרם שויכו' },
   { key: 'guests', label: 'אורחים' },
   { key: 'members', label: 'חברים' },
   { key: 'veterans', label: 'ותיקים' },
@@ -49,11 +95,24 @@ export default function AdminUsersPage() {
   const [capDraft, setCapDraft] = useState('');
   const [lastNameDraft, setLastNameDraft] = useState('');
   const [savingLastName, setSavingLastName] = useState(false);
+  const [playingUserId, setPlayingUserId] = useState<string | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const fetchGenRef = useRef(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const fetchUsers = useCallback(async (): Promise<any[]> => {
+    const gen = ++fetchGenRef.current;
     setLoading(true);
     try {
-      const data = await getAdminUsers(filter || undefined, search || undefined, page);
+      const data = await getAdminUsers(filter || undefined, debouncedSearch || undefined, page);
+      if (gen !== fetchGenRef.current) return [];
       setUsers(data.users);
       setTotal(data.total);
       setPages(data.pages);
@@ -62,20 +121,18 @@ export default function AdminUsersPage() {
       console.error(e);
       return [];
     } finally {
-      setLoading(false);
+      if (gen === fetchGenRef.current) setLoading(false);
     }
-  }, [filter, search, page]);
+  }, [filter, debouncedSearch, page]);
 
   useEffect(() => {
     if (adminLoading) return;
-    if (!isSuperUser) { navigate('/clicks', { replace: true }); return; }
-    fetchUsers();
+    if (!isSuperUser) {
+      navigate('/clicks', { replace: true });
+      return;
+    }
+    void fetchUsers();
   }, [adminLoading, isSuperUser, fetchUsers, navigate]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => { setPage(1); fetchUsers(); }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   useEffect(() => {
     if (!selectedUser) return;
@@ -136,6 +193,53 @@ export default function AdminUsersPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'שגיאה בביצוע הפעולה';
       toast.error(message);
+    }
+    setActionLoading(false);
+  };
+
+  const setUserGroup = async (
+    targetId: string,
+    action: 'approve_b' | 'move_a' | 'reject',
+  ) => {
+    setActionLoading(true);
+    try {
+      const { data: adminAuth } = await supabase.auth.getUser();
+      const reviewed = {
+        moderation_reviewed_at: new Date().toISOString(),
+        moderation_reviewed_by: adminAuth.user?.id ?? null,
+      };
+      if (action === 'approve_b') {
+        await updateProfileSuitability(targetId, {
+          suitability_status: 'shadow',
+          is_shadow: true,
+          moderation_status: 'approved',
+          ...reviewed,
+        });
+        toast.success('המשתמש אושר לקבוצה B');
+      } else if (action === 'move_a') {
+        await updateProfileSuitability(targetId, {
+          suitability_status: 'active',
+          is_shadow: false,
+          moderation_status: 'approved',
+          profile_completed: true,
+          ...reviewed,
+        });
+        toast.success('המשתמש הועבר לקבוצה A');
+      } else {
+        await updateProfileSuitability(targetId, {
+          suitability_status: 'blocked',
+          is_shadow: false,
+          moderation_status: 'rejected',
+          ...reviewed,
+        });
+        toast.success('המשתמש נדחה');
+      }
+      notifyProfileUpdated(targetId);
+      const refreshed = await fetchUsers();
+      const fresh = refreshed.find((u) => u.user_id === targetId);
+      if (fresh) setSelectedUser(fresh);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'עדכון הקבוצה נכשל');
     }
     setActionLoading(false);
   };
@@ -206,6 +310,9 @@ export default function AdminUsersPage() {
           <div className="space-y-2">
             {users.map((u) => {
               const statusCfg = statusConfig[u.status] || statusConfig.new;
+              const playable = hasPlayableVoiceIntro(u);
+              const pendingModeration = u.moderation_status === 'pending';
+              const group = deriveAdminUserGroup(u);
               return (
                 <GlassCard
                   key={u.user_id}
@@ -214,28 +321,51 @@ export default function AdminUsersPage() {
                   onClick={() => setSelectedUser(u)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {u.photos?.[0] || u.avatar_url ? (
-                        <img src={u.photos?.[0] || u.avatar_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <User size={18} className="text-muted-foreground" />
-                      )}
-                    </div>
+                    <AdminUserAvatar user={u} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-foreground text-sm">{u.first_name || 'ללא שם'}</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/15 text-primary">
+                          {adminUserGroupLabel(group)}
+                        </span>
                         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${roleBadgeColors[u.role] || roleBadgeColors.guest}`}>
                           {u.role === 'member' ? 'חבר' : 'אורח'}
                         </span>
                         <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium" style={{ background: statusCfg.bg, color: statusCfg.text }}>
                           {statusCfg.label}
                         </span>
+                        {pendingModeration && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-destructive/10 text-destructive">
+                            {moderationDisplayLabel('pending')}
+                          </span>
+                        )}
                         {u.suspended && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-destructive/10 text-destructive">מושעה</span>}
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {u.phone || 'ללא טלפון'} · {u.events_attended} אירועים · הצטרף/ה {new Date(u.created_at).toLocaleDateString('he-IL')}
                       </div>
+                      {!playable && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">חסרה הקלטה</div>
+                      )}
                     </div>
+                    {playable && (
+                      <div
+                        className="flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <VoiceIntroReviewPlayer
+                          objectPath={u.voice_intro_url}
+                          durationSeconds={u.voice_intro_duration ?? null}
+                          userId={u.user_id}
+                          lazy
+                          compact
+                          hideDownload
+                          isActive={playingUserId === u.user_id}
+                          onRequestPlay={() => setPlayingUserId(u.user_id)}
+                        />
+                      </div>
+                    )}
                   </div>
                 </GlassCard>
               );
@@ -268,23 +398,54 @@ export default function AdminUsersPage() {
               <GlassCard variant="strong" className="p-5 space-y-4 rounded-t-2xl rounded-b-none min-h-[50vh]">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-full bg-muted overflow-hidden">
-                      {selectedUser.photos?.[0] || selectedUser.avatar_url ? (
-                        <img src={selectedUser.photos?.[0] || selectedUser.avatar_url} alt="" className="w-full h-full object-cover" />
-                      ) : <User size={28} className="text-muted-foreground w-full h-full flex items-center justify-center" />}
-                    </div>
+                    <AdminUserAvatar user={selectedUser} sizeClass="w-16 h-16" />
                     <div>
                       <h3 className="font-bold text-foreground text-lg">{selectedUser.first_name || 'ללא שם'}</h3>
                       <p className="text-sm text-muted-foreground">{selectedUser.phone}</p>
+                      <p className="text-xs text-primary mt-1 font-medium">
+                        {adminUserGroupLabel(deriveAdminUserGroup(selectedUser))}
+                      </p>
+                      {selectedUser.moderation_status === 'pending' && (
+                        <p className="text-xs text-destructive mt-1">{moderationDisplayLabel('pending')}</p>
+                      )}
                     </div>
                   </div>
-                  <button onClick={() => setSelectedUser(null)}><X size={20} className="text-muted-foreground" /></button>
+                  <button type="button" onClick={() => setSelectedUser(null)}><X size={20} className="text-muted-foreground" /></button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="text-muted-foreground">פרופיל: <span className="text-foreground font-medium">{selectedUser.profile_completion || 0}%</span></div>
                   <div className="text-muted-foreground">אירועים: <span className="text-foreground font-medium">{selectedUser.events_attended}</span></div>
                   <div className="text-muted-foreground col-span-2">נקודות: <span className="text-foreground font-medium">{selectedUser.points ?? 0}</span></div>
+                </div>
+
+                {/* Group management */}
+                <div className="space-y-2 pt-1">
+                  <h4 className="text-sm font-semibold text-muted-foreground">שיוך קבוצה</h4>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => void setUserGroup(selectedUser.user_id, 'approve_b')}
+                    className="w-full h-11 rounded-xl bg-primary/10 text-primary text-sm font-medium disabled:opacity-50"
+                  >
+                    אישור לקבוצה B
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => void setUserGroup(selectedUser.user_id, 'move_a')}
+                    className="w-full h-11 rounded-xl border border-primary text-primary text-sm font-medium disabled:opacity-50"
+                  >
+                    העברה לקבוצה A
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => void setUserGroup(selectedUser.user_id, 'reject')}
+                    className="w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-medium disabled:opacity-50"
+                  >
+                    דחיית משתמש
+                  </button>
                 </div>
 
                 {/* Last name editing */}
@@ -312,13 +473,17 @@ export default function AdminUsersPage() {
                 {/* Onboarding recording */}
                 <div className="space-y-2 pt-1">
                   <h4 className="text-sm font-semibold text-muted-foreground">הקלטת הרשמה</h4>
-                  {selectedUser.voice_intro_url ? (
+                  {hasPlayableVoiceIntro(selectedUser) ? (
                     <VoiceIntroReviewPlayer
                       objectPath={selectedUser.voice_intro_url}
                       durationSeconds={selectedUser.voice_intro_duration ?? null}
+                      userId={selectedUser.user_id}
+                      lazy
+                      isActive={playingUserId === selectedUser.user_id}
+                      onRequestPlay={() => setPlayingUserId(selectedUser.user_id)}
                     />
                   ) : (
-                    <p className="text-xs text-muted-foreground">לא קיימת הקלטה למשתמש זה</p>
+                    <p className="text-xs text-muted-foreground">חסרה הקלטה</p>
                   )}
                 </div>
 

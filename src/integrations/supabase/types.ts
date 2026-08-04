@@ -508,6 +508,7 @@ export type Database = {
       }
       events: {
         Row: {
+          audience_group: string
           cover_image_url: string | null
           created_at: string | null
           created_by: string | null
@@ -529,6 +530,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          audience_group?: string
           cover_image_url?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -550,6 +552,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          audience_group?: string
           cover_image_url?: string | null
           created_at?: string | null
           created_by?: string | null

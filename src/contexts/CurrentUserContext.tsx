@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -179,12 +180,15 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     };
   }, [authId]);
 
-  const value: CurrentUser = {
-    authId: authId || '',
-    profile,
-    role: (profile?.role as 'guest' | 'member') || 'guest',
-    loading,
-  };
+  const value = useMemo<CurrentUser>(
+    () => ({
+      authId: authId || '',
+      profile,
+      role: (profile?.role as 'guest' | 'member') || 'guest',
+      loading,
+    }),
+    [authId, profile, loading],
+  );
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;
 }

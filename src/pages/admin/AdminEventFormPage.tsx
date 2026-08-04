@@ -239,6 +239,7 @@ export default function AdminEventFormPage() {
     name: '', date: '', time: '', location_name: '', location_address: '', location_url: '',
     description: '', max_capacity: 40, reserved_new_spots: 10, gender_balance_target: 0.5,
     cover_image_url: '', requires_subscription: false,
+    audience_group: '' as '' | 'A' | 'B' | 'ALL',
     eventStatus: 'open' as string,
     is_past_voting_open: false,
   });
@@ -261,6 +262,10 @@ export default function AdminEventFormPage() {
           max_capacity: data.max_capacity || 40, reserved_new_spots: data.reserved_new_spots || 10,
           gender_balance_target: Number(data.gender_balance_target) || 0.5, cover_image_url: data.cover_image_url || '',
           requires_subscription: data.requires_subscription === true,
+          audience_group:
+            data.audience_group === 'A' || data.audience_group === 'B' || data.audience_group === 'ALL'
+              ? data.audience_group
+              : 'ALL',
           eventStatus: data.status || 'open',
           is_past_voting_open: data.is_past_voting_open === true,
         });
@@ -276,6 +281,10 @@ export default function AdminEventFormPage() {
     const locationName = form.location_name.trim();
     if (!name || !date || !time || !locationName) {
       toast.error('יש למלא את כל השדות הנדרשים');
+      return;
+    }
+    if (!form.audience_group || !['A', 'B', 'ALL'].includes(form.audience_group)) {
+      toast.error('יש לבחור קהל יעד לאירוע');
       return;
     }
     setSaving(true);
@@ -307,6 +316,7 @@ export default function AdminEventFormPage() {
         gender_balance_target: genderBalanceTarget,
         cover_image_url: toOptional(cover_image_url),
         requires_subscription: form.requires_subscription,
+        audience_group: form.audience_group,
       };
       if (isEdit) {
         await performAdminAction('update_event', 'event', eventId, {
@@ -549,19 +559,43 @@ export default function AdminEventFormPage() {
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/60">
                 הרשאות הרשמה
               </h3>
-              <div className="rounded-2xl border border-primary/20 bg-white/75 px-4 py-4 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="rounded-2xl border border-primary/20 bg-white/75 px-4 py-4 shadow-sm space-y-4">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-foreground">קהל היעד של האירוע</h4>
+                  <p className="text-xs text-muted-foreground">בחירה חובה — קובעת מי יכול לראות ולהירשם.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { key: 'A', label: 'קבוצה A' },
+                      { key: 'B', label: 'קבוצה B' },
+                      { key: 'ALL', label: 'כל המשתמשים' },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, audience_group: opt.key }))}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                          form.audience_group === opt.key
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-primary/10 text-foreground'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/40">
                   <div className="space-y-1">
-                    <h4 className="text-sm font-semibold text-foreground">גישה לאירוע</h4>
+                    <h4 className="text-sm font-semibold text-foreground">דרישת מנוי</h4>
                     <p className="text-xs text-muted-foreground">
-                      בחירה זו קובעת האם משתמשים ללא מנוי יכולים להירשם לאירוע.
+                      האם משתמשים ללא מנוי יכולים להירשם לאירוע.
                     </p>
                   </div>
                   <span className="text-xs px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50 text-violet-700 font-medium">
-                    {form.requires_subscription ? 'האירוע דורש מנוי' : 'האירוע פתוח לכולם'}
+                    {form.requires_subscription ? 'האירוע דורש מנוי' : 'ללא דרישת מנוי'}
                   </span>
                 </div>
-                <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3">
                   <label htmlFor="requires-subscription" className="text-sm cursor-pointer">
                     האירוע דורש מנוי
                   </label>

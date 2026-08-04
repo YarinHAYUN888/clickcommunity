@@ -50,8 +50,15 @@ const sampleEvent: EventRow = {
   gender_balance_target: 0.5,
   status: 'open',
   is_past_voting_open: false,
+  audience_group: 'ALL',
   created_at: '',
   updated_at: '',
+};
+
+const approvedAViewer = {
+  isShadowUser: false,
+  isApprovedGroupA: true,
+  isApprovedGroupB: false,
 };
 
 describe('applyEventDetailSecondarySettled', () => {
@@ -119,9 +126,19 @@ describe('getEventById', () => {
 
   it('returns event when row exists and passes host isolation', async () => {
     mockMaybeSingle.mockResolvedValue({ data: sampleEvent, error: null });
-    const result = await getEventById('evt-1', false);
+    const result = await getEventById('evt-1', approvedAViewer);
     expect(result?.id).toBe('evt-1');
     expect(result?.name).toBe('Test Event');
+  });
+
+  it('hides ALL events from pending B candidate', async () => {
+    mockMaybeSingle.mockResolvedValue({ data: sampleEvent, error: null });
+    const result = await getEventById('evt-1', {
+      isShadowUser: true,
+      isApprovedGroupA: false,
+      isApprovedGroupB: false,
+    });
+    expect(result).toBeNull();
   });
 
   it('returns null for empty event id', async () => {

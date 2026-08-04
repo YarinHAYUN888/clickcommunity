@@ -23,7 +23,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState<RankedEventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { authId, profile, role } = useCurrentUser();
-  const { isShadowUser } = useUserMode();
+  const { eventViewerAccess, loading: modeLoading } = useUserMode();
   const points = (profile as { points?: number | null } | null)?.points ?? 0;
   const canCreateEvent = role === 'member' && points >= MEMBER_EVENT_MIN_POINTS;
   const pointsToCreate = Math.max(0, MEMBER_EVENT_MIN_POINTS - points);
@@ -33,16 +33,17 @@ export default function EventsPage() {
   }, []);
 
   useEffect(() => {
+    if (modeLoading) return;
     setLoading(true);
     const fetch =
       tab === 'upcoming'
-        ? () => getUpcomingEventsRanked(isShadowUser, authId || undefined)
-        : () => getPastEventsRanked(isShadowUser, authId || undefined);
+        ? () => getUpcomingEventsRanked(eventViewerAccess, authId || undefined)
+        : () => getPastEventsRanked(eventViewerAccess, authId || undefined);
     fetch()
       .then(setEvents)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [tab, isShadowUser, authId]);
+  }, [tab, eventViewerAccess, authId, modeLoading]);
 
   return (
     <div className="min-h-screen pb-4">
@@ -105,7 +106,7 @@ export default function EventsPage() {
       {/* Content */}
       <div className="px-4 md:px-6 lg:px-8 pt-4 max-w-[640px] mx-auto">
         <AnimatePresence mode="wait">
-          {loading ? (
+          {loading || modeLoading ? (
             <motion.div
               key="loading"
               initial={{ opacity: 0 }}

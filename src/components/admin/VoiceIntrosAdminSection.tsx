@@ -400,7 +400,7 @@ export function VoiceIntrosAdminSection() {
                               onClick={() => void act(r.user_id, 'active')}
                               className="w-full py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground disabled:opacity-50"
                             >
-                              אישור לקהילה
+                              העברה לקבוצה A
                             </button>
                             <div className="grid grid-cols-2 gap-2">
                               <button
@@ -409,7 +409,7 @@ export function VoiceIntrosAdminSection() {
                                 onClick={() => setShadowConfirmUserId(r.user_id)}
                                 className="py-2 rounded-xl text-xs font-semibold border border-border hover:bg-muted/60 disabled:opacity-50"
                               >
-                                סביבה מבודדת
+                                אישור לקבוצה B
                               </button>
                               <button
                                 type="button"
@@ -417,7 +417,7 @@ export function VoiceIntrosAdminSection() {
                                 onClick={() => void act(r.user_id, 'blocked')}
                                 className="py-2 rounded-xl text-xs font-semibold text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50"
                               >
-                                דחייה
+                                דחיית משתמש
                               </button>
                             </div>
                           </div>
@@ -464,7 +464,7 @@ export function VoiceIntrosAdminSection() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.96, opacity: 0 }}
             >
-              <h3 className="text-lg font-bold text-foreground">העברה לסביבה מבודדת</h3>
+              <h3 className="text-lg font-bold text-foreground">אישור לקבוצה B</h3>
               <p className="text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">
                   {shadowConfirmRow.first_name || 'משתמש/ת'}

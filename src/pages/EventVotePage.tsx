@@ -21,7 +21,7 @@ export default function EventVotePage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { authId } = useCurrentUser();
-  const { isShadowUser } = useUserMode();
+  const { eventViewerAccess, loading: modeLoading } = useUserMode();
   const [event, setEvent] = useState<EventRow | null>(null);
   const [attendees, setAttendees] = useState<any[]>([]);
   const [votes, setVotes] = useState<Record<string, VoteChoice>>({});
@@ -29,13 +29,13 @@ export default function EventVotePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!eventId || !authId) return;
+    if (!eventId || !authId || modeLoading) return;
 
     let cancelled = false;
     setLoading(true);
 
     void (async () => {
-      const ev = await getEventById(eventId, isShadowUser);
+      const ev = await getEventById(eventId, eventViewerAccess);
       if (cancelled) return;
 
       setEvent(ev);
@@ -76,7 +76,7 @@ export default function EventVotePage() {
     return () => {
       cancelled = true;
     };
-  }, [eventId, authId, isShadowUser]);
+  }, [eventId, authId, eventViewerAccess, modeLoading]);
 
   const votedCount = Object.keys(votes).length;
 

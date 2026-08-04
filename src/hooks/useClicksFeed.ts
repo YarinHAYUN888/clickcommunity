@@ -63,8 +63,18 @@ export function useClicksFeed(currentUserId: string, myProfile: SupabaseProfile 
     setError(null);
 
     const nowIso = new Date().toISOString();
+    // Bound the candidate pool — full-table select was the main clicks-tab stall.
+    const FEED_PROFILE_COLUMNS =
+      'user_id, first_name, last_name, photos, avatar_url, bio, occupation, interests, region, region_other, life_niche, date_of_birth, gender, role, status, moderation_status, suitability_status, is_shadow, suspended, super_role, instagram, tiktok';
     const [{ data, error }, swipeRes, boostRes, incomingRes] = await Promise.all([
-      supabase.from('profiles').select('*').neq('user_id', currentUserId),
+      supabase
+        .from('profiles')
+        .select(FEED_PROFILE_COLUMNS)
+        .neq('user_id', currentUserId)
+        .eq('role', 'member')
+        .eq('moderation_status', 'approved')
+        .order('created_at', { ascending: false })
+        .limit(300),
       supabase.from('profile_swipes').select('to_user_id').eq('from_user_id', currentUserId),
       supabase
         .from('user_click_actions')

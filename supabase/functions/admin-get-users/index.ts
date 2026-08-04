@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     let query = supabaseAdmin
       .from("profiles")
       .select(
-        "user_id, first_name, last_name, phone, role, status, subscription_status, profile_completion, created_at, suspended, avatar_url, photos, gender, points, referral_code, referral_disabled, referral_cap_override, voice_intro_url, voice_intro_duration, voice_intro_status",
+        "user_id, first_name, last_name, phone, role, status, subscription_status, profile_completion, created_at, suspended, avatar_url, photos, gender, points, referral_code, referral_disabled, referral_cap_override, voice_intro_url, voice_intro_duration, voice_intro_status, moderation_status, suitability_status, is_shadow",
         { count: "exact" },
       );
 
@@ -49,6 +49,22 @@ Deno.serve(async (req) => {
     else if (filter === "veterans") query = query.eq("status", "veteran");
     else if (filter === "ambassadors") query = query.eq("status", "ambassador");
     else if (filter === "suspended") query = query.eq("suspended", true);
+    else if (filter === "group_a") {
+      query = query
+        .eq("suitability_status", "active")
+        .eq("is_shadow", false)
+        .eq("moderation_status", "approved");
+    } else if (filter === "group_b") {
+      query = query
+        .eq("suitability_status", "shadow")
+        .eq("is_shadow", true)
+        .eq("moderation_status", "approved");
+    } else if (filter === "pending_review") {
+      query = query.eq("moderation_status", "pending");
+    } else if (filter === "unassigned") {
+      // Not yet placed in approved A or approved B
+      query = query.eq("suitability_status", "pending");
+    }
 
     if (search) {
       query = query.or(`first_name.ilike.%${search}%,phone.ilike.%${search}%`);

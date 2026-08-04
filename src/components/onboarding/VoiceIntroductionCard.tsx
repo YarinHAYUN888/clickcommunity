@@ -446,7 +446,7 @@ export function VoiceIntroductionCard() {
             הקלטה קולית בלבד (לא וידאו) — ספר/י מי את/ה, למה תרצה/י להצטרף לקהילה ומה מחפש/ת כאן
           </p>
           <p className="text-[11px] text-muted-foreground/90 font-medium">
-            אורך נדרש: {VOICE_INTRO_MIN_SEC} שניות עד {formatClock(VOICE_INTRO_MAX_SEC)} (דקה וחצי לכל היותר) · אופציונלי
+            אורך נדרש: {VOICE_INTRO_MIN_SEC} שניות עד {formatClock(VOICE_INTRO_MAX_SEC)} (דקה וחצי לכל היותר) · חובה
           </p>
         </div>
 

@@ -38,32 +38,47 @@ export function IntroductionQuestionnaireStep({
     });
   }
 
+  const [voiceMissing, setVoiceMissing] = useState(false);
+
   function handleNext() {
     setTouched(true);
     const draft = voiceIntroDraftRef.current;
-    if (draft) {
-      const d = draft.durationSec;
-      if (d < VOICE_INTRO_MIN_SEC || d > VOICE_INTRO_MAX_SEC + 0.5) {
-        return;
-      }
+    if (!draft?.blob || draft.blob.size < 1) {
+      setVoiceMissing(true);
+      return;
     }
+    const d = draft.durationSec;
+    if (d < VOICE_INTRO_MIN_SEC || d > VOICE_INTRO_MAX_SEC + 0.5) {
+      setVoiceMissing(true);
+      return;
+    }
+    setVoiceMissing(false);
     const { ok } = validateQuestionnaire(responses);
     if (!ok) return;
     onNext();
   }
 
   const validation = validateQuestionnaire(responses);
+  const hasVoice =
+    Boolean(voiceIntroDraftRef.current?.blob) &&
+    (voiceIntroDraftRef.current?.durationSec ?? 0) >= VOICE_INTRO_MIN_SEC;
 
   return (
     <div className="space-y-6 pb-4" dir="rtl">
       <div>
         <h2 className="text-[26px] md:text-[32px] font-bold text-foreground leading-tight">שאלון היכרות קצר</h2>
         <p className="text-muted-foreground text-[15px] mt-2 leading-relaxed">
-          כמה שאלות פתוחות כדי שנכיר אתכם טוב יותר. לפני השאלות יש אפשרות להקלטה קולית קצרה (לא וידאו) — האורך הנדרש מוצג שם.
+          כמה שאלות פתוחות כדי שנכיר אתכם טוב יותר. לפני השאלות יש להקליט הקלטת היכרות קולית קצרה (חובה) — האורך הנדרש מוצג שם.
         </p>
       </div>
 
       <VoiceIntroductionCard />
+
+      {touched && voiceMissing && (
+        <p className="text-sm text-destructive text-center">
+          יש להקליט הקלטת היכרות באורך {VOICE_INTRO_MIN_SEC}–{VOICE_INTRO_MAX_SEC} שניות לפני המשך
+        </p>
+      )}
 
       <div className="space-y-6">
         {INTRODUCTION_QUESTIONS.map((q, index) => (
@@ -88,10 +103,10 @@ export function IntroductionQuestionnaireStep({
         onClick={handleNext}
         className="w-full h-14 rounded-full font-semibold text-lg text-primary-foreground shadow-lg transition-opacity"
         style={{
-          background: validation.ok || !touched
+          background: (validation.ok && hasVoice) || !touched
             ? 'linear-gradient(135deg, hsl(263 84% 55%), hsl(271 81% 56%))'
             : 'hsl(var(--muted))',
-          opacity: validation.ok || !touched ? 1 : 0.85,
+          opacity: (validation.ok && hasVoice) || !touched ? 1 : 0.85,
         }}
       >
         המשך לאימות החשבון

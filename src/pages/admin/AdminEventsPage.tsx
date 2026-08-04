@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Plus, Calendar, Check, X } from 'lucide-react';
 import { LumaSpin } from '@/components/ui/luma-spin';
@@ -7,6 +7,7 @@ import { useAdmin } from '@/contexts/AdminContext';
 import { supabase } from '@/integrations/supabase/client';
 import { performAdminAction } from '@/services/admin';
 import { toast } from 'sonner';
+import { eventAudienceLabel } from '@/lib/admin/userGroupLabels';
 
 const statusColors: Record<string, string> = {
   open: 'bg-success/10 text-success',
@@ -22,6 +23,9 @@ const statusLabels: Record<string, string> = {
   pending_review: 'ממתין לאישור', rejected: 'נדחה',
 };
 
+type AudienceFilter = '' | 'A' | 'B' | 'ALL';
+type PreviewMode = 'none' | 'A' | 'B' | 'ALL';
+
 type EventLite = {
   id: string;
   name: string;
@@ -32,7 +36,16 @@ type EventLite = {
   max_capacity: number;
   cover_image_url: string | null;
   created_by: string | null;
+  audience_group?: string | null;
 };
+
+/** Preview/filter for approved A or B: they see their group + ALL. */
+function matchesViewerPreview(ag: string | null | undefined, mode: 'A' | 'B' | 'ALL'): boolean {
+  const value = ag === 'A' || ag === 'B' || ag === 'ALL' ? ag : 'ALL';
+  if (mode === 'ALL') return value === 'ALL';
+  if (mode === 'A') return value === 'A' || value === 'ALL';
+  return value === 'B' || value === 'ALL';
+}
 
 export default function AdminEventsPage() {
   const navigate = useNavigate();
@@ -41,9 +54,14 @@ export default function AdminEventsPage() {
   const [creatorNames, setCreatorNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [audienceFilter, setAudienceFilter] = useState<AudienceFilter>('');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('none');
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
+    const { data } = await supabase
+      .from('events')
+      .select('id, name, status, date, time, location_name, max_capacity, cover_image_url, created_by, audience_group')
+      .order('date', { ascending: true });
     const rows = (data || []) as EventLite[];
     setEvents(rows);
 
@@ -89,11 +107,22 @@ export default function AdminEventsPage() {
     }
   };
 
-  const pending = events.filter((e) => e.status === 'pending_review');
-  const upcoming = events
+  const visibleEvents = useMemo(() => {
+    return events.filter((e) => {
+      const ag = e.audience_group ?? 'ALL';
+      if (audienceFilter === 'A' && ag !== 'A') return false;
+      if (audienceFilter === 'B' && ag !== 'B') return false;
+      if (audienceFilter === 'ALL' && ag !== 'ALL') return false;
+      if (previewMode !== 'none' && !matchesViewerPreview(ag, previewMode)) return false;
+      return true;
+    });
+  }, [events, audienceFilter, previewMode]);
+
+  const pending = visibleEvents.filter((e) => e.status === 'pending_review');
+  const upcoming = visibleEvents
     .filter((e) => !['past', 'pending_review', 'rejected'].includes(e.status))
     .sort((a, b) => a.date.localeCompare(b.date));
-  const past = events.filter((e) => e.status === 'past').sort((a, b) => b.date.localeCompare(a.date));
+  const past = visibleEvents.filter((e) => e.status === 'past').sort((a, b) => b.date.localeCompare(a.date));
   const listed = [...upcoming, ...past];
 
   return (
@@ -110,6 +139,58 @@ export default function AdminEventsPage() {
           >
             <Plus size={16} /> אירוע חדש
           </button>
+        </div>
+
+        <div className="space-y-3 mb-4">
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">סינון לפי קהל יעד</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {([
+                { key: '', label: 'הכל' },
+                { key: 'A', label: 'קבוצה A' },
+                { key: 'B', label: 'קבוצה B' },
+                { key: 'ALL', label: 'ALL בלבד' },
+              ] as const).map((f) => (
+                <button
+                  key={f.key || 'all'}
+                  type="button"
+                  onClick={() => setAudienceFilter(f.key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                    audienceFilter === f.key ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-foreground'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">תצוגה לפי קבוצה (Preview בלבד)</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {([
+                { key: 'none', label: 'כבוי' },
+                { key: 'A', label: 'מה רואה A' },
+                { key: 'B', label: 'מה רואה B' },
+                { key: 'ALL', label: 'אירועי ALL' },
+              ] as const).map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setPreviewMode(f.key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                    previewMode === f.key ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {previewMode !== 'none' && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                תצוגת בדיקה בלבד — לא משנה את הקבוצה שלך או את ה־Session.
+              </p>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -133,10 +214,13 @@ export default function AdminEventsPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-foreground text-sm truncate">{event.name}</span>
                           <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColors.pending_review}`}>
                             {statusLabels.pending_review}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/15 text-primary">
+                            {eventAudienceLabel(event.audience_group)}
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
@@ -190,10 +274,13 @@ export default function AdminEventsPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-foreground text-sm truncate">{event.name}</span>
                           <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColors[event.status] || statusColors.open}`}>
                             {statusLabels[event.status] || event.status}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/15 text-primary">
+                            {eventAudienceLabel(event.audience_group)}
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
