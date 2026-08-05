@@ -11,8 +11,9 @@ export default function WelcomePage() {
   const navigate = useNavigate();
 
   return (
-    <AnimatedBackground className="items-center justify-center px-6">
+    <AnimatedBackground className="items-center justify-center pt-[max(12px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]">
       <div
+        data-welcome="content"
         className="z-10"
         style={{
           display: 'flex',
@@ -22,38 +23,41 @@ export default function WelcomePage() {
           width: '100%',
           maxWidth: '28rem',
           marginInline: 'auto',
+          paddingInline: '1.5rem',
+          boxSizing: 'border-box',
           textAlign: 'center',
-          paddingTop: 'max(12px, env(safe-area-inset-top))',
-          paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
         }}
       >
         {/* Logo */}
         <motion.div
+          data-welcome="logo"
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
           style={{
             display: 'flex',
             width: '100%',
+            alignSelf: 'center',
             alignItems: 'center',
             justifyContent: 'center',
             marginInline: 'auto',
-            textAlign: 'center',
+            lineHeight: 0,
           }}
         >
-          <div style={{ marginInline: 'auto', lineHeight: 0 }}>
-            <ClicksLogo size={180} glow />
-          </div>
+          {/* `tight` keeps the artwork optically centred; 162 matches the previous rendered size. */}
+          <ClicksLogo size={162} variant="tight" glow />
         </motion.div>
 
         {/* Tagline */}
         <motion.p
+          data-welcome="tagline"
           className="mt-3 text-lg text-muted-foreground md:text-[22px]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2, duration: 0.5 }}
           style={{
             width: '100%',
+            alignSelf: 'stretch',
             marginInline: 'auto',
             textAlign: 'center',
           }}
@@ -63,13 +67,15 @@ export default function WelcomePage() {
 
         {/* Primary CTA */}
         <motion.button
+          data-welcome="cta"
           className="z-10 mt-10 h-14 w-[280px] max-w-full rounded-full text-lg font-semibold text-primary-foreground md:w-[320px]"
           style={{
-            marginInline: 'auto',
-            textAlign: 'center',
             display: 'flex',
+            alignSelf: 'center',
             alignItems: 'center',
             justifyContent: 'center',
+            marginInline: 'auto',
+            textAlign: 'center',
             background: 'linear-gradient(135deg, hsl(263 84% 55%), hsl(271 81% 56%))',
             boxShadow: '0 4px 16px rgba(124, 58, 237, 0.3)',
           }}
@@ -84,6 +90,7 @@ export default function WelcomePage() {
 
         {/* Terms */}
         <motion.p
+          data-welcome="terms"
           className="mt-4 text-[13px] text-muted-foreground"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -91,8 +98,10 @@ export default function WelcomePage() {
           style={{
             width: '100%',
             maxWidth: '20rem',
+            alignSelf: 'center',
             marginInline: 'auto',
             textAlign: 'center',
+            textWrap: 'balance',
           }}
         >
           בהמשך השימוש את/ה מסכים/ה ל
@@ -107,11 +116,15 @@ export default function WelcomePage() {
 
         {/* Secondary CTA */}
         <motion.button
+          data-welcome="signin"
           type="button"
           className="mt-2 text-base font-medium"
           style={{
-            display: 'block',
+            display: 'flex',
             width: '100%',
+            alignSelf: 'stretch',
+            alignItems: 'center',
+            justifyContent: 'center',
             marginInline: 'auto',
             textAlign: 'center',
             color: 'hsl(var(--color-primary))',
